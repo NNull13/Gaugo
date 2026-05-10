@@ -1,0 +1,183 @@
+# Configuration
+
+## When to use this
+
+Use this reference when configuring runners, suites, judges, retries, timeouts, parallelism, or provider URLs.
+
+## Runner and Suite options
+
+Options are passed to `gaugo.NewRunner` or `gaugo.New`.
+
+```go
+runner, err := gaugo.NewRunner(
+    gaugo.WithParallelism(8),
+    gaugo.WithCaseTimeout(10*time.Second),
+)
+```
+
+```go
+suite := gaugo.New(t,
+    gaugo.WithJudge(judge),
+    gaugo.WithParallelism(8),
+    gaugo.WithCaseTimeout(10*time.Second),
+)
+```
+
+Invalid options fail early. `NewRunner` returns an error. `New(t, ...)` fails the test.
+
+## WithJudge
+
+```go
+gaugo.WithJudge(judge)
+```
+
+Configures the LLM judge used by LLM-based metrics such as `Faithfulness` and `AnswerRelevancy`.
+
+`WithJudge` may receive any value that implements:
+
+```go
+type Judge interface {
+    EvaluateJSON(ctx context.Context, req gaugo.JudgeRequest) (gaugo.JudgeResponse, error)
+}
+```
+
+## WithParallelism
+
+```go
+gaugo.WithParallelism(16)
+```
+
+Sets the maximum number of cases evaluated concurrently. The default is `runtime.GOMAXPROCS(0)`.
+
+Use lower values when:
+
+- Provider rate limits are tight.
+- Your system under test shares limited resources.
+- You need easier local debugging.
+
+Use higher values when:
+
+- Cases are mostly I/O-bound.
+- Provider quotas allow concurrent requests.
+- You are running larger suites in CI or batch jobs.
+
+The value must be positive.
+
+## WithCaseTimeout
+
+```go
+gaugo.WithCaseTimeout(15 * time.Second)
+```
+
+Applies a per-case timeout to the run function and metric evaluation. The timeout is enforced with the case context, so your `RunFunc`, provider client, and custom metrics should honor `ctx`.
+
+The value must be non-negative. Use `0` for no per-case timeout.
+
+## WithReporter
+
+```go
+gaugo.WithReporter(reporter)
+```
+
+Overrides the default reporter. A reporter receives the complete `RunResult`.
+
+```go
+type Reporter interface {
+    Report(ctx context.Context, result gaugo.RunResult)
+}
+```
+
+Important: when a custom reporter is configured on a `Suite`, Gaugo does not also run the default `testing` assertion reporter. If you still want test failures, make your reporter call `gaugo.Assert(t, result)` or use `Runner` directly and assert afterward.
+
+## WithMetricDetailsLimit
+
+```go
+gaugo.WithMetricDetailsLimit(16 * 1024)
+```
+
+Caps stored `MetricResult.Details` bytes per metric. The default is 8 KiB.
+
+Use `0` to disable metric details entirely.
+
+The value must be non-negative.
+
+## RetryConfig
+
+Bundled providers accept `gaugo.RetryConfig`.
+
+```go
+type RetryConfig struct {
+    MaxAttempts int
+    BaseDelay   time.Duration
+    MaxDelay    time.Duration
+}
+```
+
+Defaults:
+
+```go
+gaugo.DefaultRetryConfig()
+// MaxAttempts: 3
+// BaseDelay:   100 * time.Millisecond
+// MaxDelay:    2 * time.Second
+```
+
+Zero values use defaults. Negative values are invalid. Providers retry transient HTTP statuses (`429`, `5xx`) and transient transport errors (for example timeout, EOF, and connection reset). `Retry-After` is honored and capped by `MaxDelay`.
+
+## Provider HTTP configuration
+
+Bundled provider configs share these fields:
+
+```go
+HTTPClient      *http.Client
+Retry           gaugo.RetryConfig
+MaxResponseBody int64
+```
+
+`HTTPClient` lets you provide custom timeouts, transports, proxies, or test servers.
+
+`MaxResponseBody` caps provider response bodies. Use `0` for the provider default, currently 1 MiB.
+
+## BaseURL and EndpointURL
+
+Bundled provider configs use consistent URL semantics:
+
+- `BaseURL` is an API root.
+- `EndpointURL` is a full endpoint override.
+
+Hosted providers (OpenAI, Anthropic, Gemini, xAI) validate URLs in strict mode by default:
+
+- `https` is required.
+- Host must be the official provider host.
+- URL user info is rejected.
+
+Hosted provider configs expose `AllowUnsafeURL bool` as an explicit escape hatch for local stubs, test servers, and custom gateways.
+
+Prefer strict defaults in production.
+
+```go
+judge, err := openai.New(openai.Config{
+    APIKey:  os.Getenv("OPENAI_API_KEY"),
+    BaseURL: "https://api.openai.com/v1",
+})
+```
+
+Use `EndpointURL` for tests, stubs, or gateways that expose a single exact endpoint.
+
+```go
+judge, err := openai.New(openai.Config{
+    APIKey:         "test-key",
+    EndpointURL:    server.URL,
+    AllowUnsafeURL: true,
+})
+```
+
+If both are set, `EndpointURL` wins.
+
+## Tips
+
+- Set `WithCaseTimeout` before running LLM-backed metrics in CI.
+- Tune `WithParallelism` against provider rate limits, not CPU alone.
+- Keep `MaxResponseBody` small unless you intentionally need large provider responses.
+- Use strict URL defaults for hosted providers.
+- Use `AllowUnsafeURL` only for trusted test/proxy infrastructure.
