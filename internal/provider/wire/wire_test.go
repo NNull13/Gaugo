@@ -63,6 +63,77 @@ func TestStatusErrorRedacted(t *testing.T) {
 	}
 }
 
+func TestStatusErrorDuckTypedMetadata(t *testing.T) {
+	t.Parallel()
+
+	h := http.Header{}
+	h.Set("x-request-id", "req_xai")
+
+	err := StatusErrorForWire("xai", "responses", HTTPResponse{
+		StatusCode: http.StatusTooManyRequests,
+		Header:     h,
+		Body:       []byte(`rate limited`),
+	})
+	msg := err.Error()
+	if !strings.Contains(msg, `xai/responses request failed status=429`) {
+		t.Fatalf("unexpected error label: %q", msg)
+	}
+
+	var metadata interface {
+		GaugoErrorKind() string
+		GaugoProvider() string
+		GaugoWire() string
+		GaugoStatusCode() int
+		GaugoRequestID() string
+		GaugoBodyBytes() int
+	}
+	if !errors.As(err, &metadata) {
+		t.Fatalf("expected duck-typed metadata, got %T", err)
+	}
+	if got, want := metadata.GaugoErrorKind(), "provider_rate_limit"; got != want {
+		t.Fatalf("kind got=%q want=%q", got, want)
+	}
+	if metadata.GaugoProvider() != "xai" || metadata.GaugoWire() != "responses" || metadata.GaugoStatusCode() != 429 ||
+		metadata.GaugoRequestID() != "req_xai" || metadata.GaugoBodyBytes() != len("rate limited") {
+		t.Fatalf("unexpected metadata provider=%q wire=%q status=%d request=%q body=%d",
+			metadata.GaugoProvider(),
+			metadata.GaugoWire(),
+			metadata.GaugoStatusCode(),
+			metadata.GaugoRequestID(),
+			metadata.GaugoBodyBytes(),
+		)
+	}
+}
+
+func TestStatusErrorKindMapping(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		status int
+		want   string
+	}{
+		{status: http.StatusTooManyRequests, want: "provider_rate_limit"},
+		{status: http.StatusUnauthorized, want: "provider_auth"},
+		{status: http.StatusForbidden, want: "provider_auth"},
+		{status: http.StatusBadRequest, want: "provider_request"},
+		{status: http.StatusUnprocessableEntity, want: "provider_request"},
+		{status: http.StatusInternalServerError, want: "provider_unavailable"},
+		{status: http.StatusServiceUnavailable, want: "provider_unavailable"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			t.Parallel()
+
+			err := &HTTPStatusError{StatusCode: tc.status}
+			if got := err.GaugoErrorKind(); got != tc.want {
+				t.Fatalf("kind got=%q want=%q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRequestID(t *testing.T) {
 	t.Parallel()
 
@@ -262,6 +333,60 @@ func TestHelpers(t *testing.T) {
 	}
 	if got := NormalizeSchemaName(" Answer-Relevancy "); got != "answer_relevancy" {
 		t.Fatalf("schema name got=%q", got)
+	}
+	if got := NormalizeSchemaName("Answer/Relevancy!"); got != "answer_relevancy" {
+		t.Fatalf("strict schema name got=%q", got)
+	}
+	if got := NormalizeSchemaName(" --- "); got != "gaugo_metric" {
+		t.Fatalf("empty schema name got=%q", got)
+	}
+	if got := NormalizeSchemaName(strings.Repeat("A", 80)); got != strings.Repeat("a", 64) {
+		t.Fatalf("long schema name got len=%d value=%q", len(got), got)
+	}
+	if got := NormalizeSchemaName(strings.Repeat("A", 63) + "!B"); got != strings.Repeat("a", 63)+"b" {
+		t.Fatalf("boundary schema name got len=%d value=%q", len(got), got)
+	}
+}
+
+func TestEndpointURL(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		endpointURL string
+		baseURL     string
+		defaultBase string
+		path        string
+		want        string
+	}{
+		{"explicit endpoint wins", "https://custom/v1", "https://base", "https://default", "/path", "https://custom/v1"},
+		{"base URL with path", "", "https://base", "https://default", "/path", "https://base/path"},
+		{"default when empty", "", "", "https://default", "/path", "https://default/path"},
+		{"trailing slash trimmed", "", "https://base/", "https://default", "/path", "https://base/path"},
+		{"whitespace trimmed", "  https://custom  ", "", "https://default", "/path", "https://custom"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := EndpointURL(tt.endpointURL, tt.baseURL, tt.defaultBase, tt.path)
+			if got != tt.want {
+				t.Fatalf("EndpointURL() got=%q want=%q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProviderLabel(t *testing.T) {
+	t.Parallel()
+
+	if got := ProviderLabel("openai", "fallback"); got != "openai" {
+		t.Fatalf("got=%q want=openai", got)
+	}
+	if got := ProviderLabel("", "fallback"); got != "fallback" {
+		t.Fatalf("got=%q want=fallback", got)
+	}
+	if got := ProviderLabel("  ", "fallback"); got != "fallback" {
+		t.Fatalf("got=%q want=fallback (whitespace)", got)
 	}
 }
 

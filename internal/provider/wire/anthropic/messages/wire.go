@@ -3,7 +3,6 @@ package messages
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -47,13 +46,6 @@ type formatSpec struct {
 }
 
 func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.EvalResult, error) {
-	var (
-		err    error
-		schema any
-		body   []byte
-		resp   wire.HTTPResponse
-	)
-
 	apiKey := strings.TrimSpace(cfg.APIKey)
 	if apiKey == "" {
 		return wire.EvalResult{}, provider.ProviderAPIKeyRequiredError(provider.Anthropic)
@@ -62,28 +54,30 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 	if model == "" {
 		model = provider.AnthropicDefaultModel
 	}
-	endpoint := endpointURL(cfg.EndpointURL, cfg.BaseURL, provider.AnthropicBaseURL, provider.AnthropicMessagesPath)
+	endpoint := wire.EndpointURL(cfg.EndpointURL, cfg.BaseURL, provider.AnthropicBaseURL, provider.AnthropicMessagesPath)
 	apiVersion := strings.TrimSpace(cfg.APIVersion)
 	if apiVersion == "" {
-		apiVersion = "2023-06-01"
+		apiVersion = provider.AnthropicDefaultAPIVersion
 	}
 	maxTokens := cfg.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = 1024
+		maxTokens = provider.AnthropicDefaultMaxTokens
 	}
 
-	schema, err = wire.DecodeSchema(req.Schema)
+	schema, err := wire.DecodeSchema(req.Schema)
 	if err != nil {
 		return wire.EvalResult{}, err
 	}
+	schema = sanitizeSchema(schema)
 
+	var body []byte
 	body, err = json.Marshal(requestBody{
 		Model:       model,
 		MaxTokens:   maxTokens,
 		System:      req.Instructions,
 		Temperature: 0,
 		Messages: []message{
-			{Role: "user", Content: req.UserPrompt},
+			{Role: wire.RoleUser, Content: req.UserPrompt},
 		},
 		OutputConfig: outputConfig{
 			Format: formatSpec{
@@ -93,16 +87,17 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		},
 	})
 	if err != nil {
-		return wire.EvalResult{}, fmt.Errorf("marshal anthropic request: %w", err)
+		return wire.EvalResult{}, wire.MarshalRequestError(provider.Anthropic, err)
 	}
 
+	var resp wire.HTTPResponse
 	resp, err = wire.PostJSONWithOptions(ctx, wire.NewHTTPClient(cfg.HTTPClient), endpoint, map[string]string{
 		wire.HeaderAnthropicAPIKey:  apiKey,
 		wire.HeaderAnthropicVersion: apiVersion,
 		wire.HeaderContentType:      wire.ContentTypeJSON,
 	}, body, wire.HTTPOptions{Retry: cfg.Retry, MaxBodyBytes: cfg.MaxResponseBody})
 	if err != nil {
-		return wire.EvalResult{}, fmt.Errorf("anthropic judge request failed: %w", err)
+		return wire.EvalResult{}, wire.JudgeRequestError(provider.Anthropic, err)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return wire.EvalResult{}, wire.StatusError(provider.Anthropic, resp)
@@ -118,13 +113,13 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 	}
 	err = json.Unmarshal(resp.Body, &parsed)
 	if err != nil {
-		return wire.EvalResult{}, fmt.Errorf("decode anthropic response: %w", err)
+		return wire.EvalResult{}, wire.DecodeResponseWrapError(provider.Anthropic, err)
 	}
 	if strings.EqualFold(parsed.StopReason, "refusal") {
-		return wire.EvalResult{}, fmt.Errorf("decode anthropic response: model refusal")
+		return wire.EvalResult{}, wire.DecodeResponseError(provider.Anthropic, wire.ErrRefusal)
 	}
 	if strings.EqualFold(parsed.StopReason, "max_tokens") {
-		return wire.EvalResult{}, fmt.Errorf("decode anthropic response: output truncated by max_tokens")
+		return wire.EvalResult{}, wire.DecodeResponseError(provider.Anthropic, "output truncated by max_tokens")
 	}
 
 	content := ""
@@ -136,11 +131,11 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 	}
 	content = wire.StripCodeFence(content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, fmt.Errorf("decode anthropic response: empty text content")
+		return wire.EvalResult{}, wire.DecodeResponseError(provider.Anthropic, "empty text content")
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, fmt.Errorf("decode anthropic response: invalid json payload")
+		return wire.EvalResult{}, wire.DecodeResponseError(provider.Anthropic, wire.ErrInvalidJSONPayload)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)
@@ -156,13 +151,24 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 	}, nil
 }
 
-func endpointURL(endpointURL, baseURL, defaultBaseURL, path string) string {
-	if endpoint := strings.TrimSpace(endpointURL); endpoint != "" {
-		return endpoint
+func sanitizeSchema(schema any) any {
+	switch v := schema.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, value := range v {
+			if key == "minimum" || key == "maximum" {
+				continue
+			}
+			out[key] = sanitizeSchema(value)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, value := range v {
+			out[i] = sanitizeSchema(value)
+		}
+		return out
+	default:
+		return schema
 	}
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if base == "" {
-		base = defaultBaseURL
-	}
-	return base + path
 }

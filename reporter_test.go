@@ -40,3 +40,27 @@ func TestMetricFailureMetadataHandlesBinaryDetails(t *testing.T) {
 		t.Fatalf("metadata got=%q want=%q", metadata, "details_bytes=3")
 	}
 }
+
+func TestMetricFailureMetadataIncludesErrorInfo(t *testing.T) {
+	t.Parallel()
+
+	m := MetricResult{
+		Name:    "AnswerRelevancy",
+		Pass:    false,
+		Reason:  "rate limited",
+		Details: []byte(`{"kind":"provider_rate_limit","message":"rate limited","provider":"anthropic","status_code":429,"request_id":"req_123"}`),
+	}
+
+	metadata := metricFailureMetadata(m)
+	for _, want := range []string{
+		"details_bytes=119",
+		`error_kind="provider_rate_limit"`,
+		`provider="anthropic"`,
+		"status_code=429",
+		`request_id="req_123"`,
+	} {
+		if !strings.Contains(metadata, want) {
+			t.Fatalf("metadata %q missing %q", metadata, want)
+		}
+	}
+}

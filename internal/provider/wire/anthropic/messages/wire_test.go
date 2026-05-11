@@ -71,6 +71,126 @@ func TestEvaluateJSON(t *testing.T) {
 	}
 }
 
+func TestEvaluateJSONSanitizesNumericSchemaBounds(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		outputConfig, ok := body["output_config"].(map[string]any)
+		if !ok {
+			t.Fatalf("output_config type got=%T", body["output_config"])
+		}
+		format, ok := outputConfig["format"].(map[string]any)
+		if !ok {
+			t.Fatalf("format type got=%T", outputConfig["format"])
+		}
+		schema, ok := format["schema"].(map[string]any)
+		if !ok {
+			t.Fatalf("schema type got=%T", format["schema"])
+		}
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("properties type got=%T", schema["properties"])
+		}
+		score, ok := properties["score"].(map[string]any)
+		if !ok {
+			t.Fatalf("score schema type got=%T", properties["score"])
+		}
+		if _, ok := score["minimum"]; ok {
+			t.Fatalf("score schema should not include minimum: %#v", score)
+		}
+		if _, ok := score["maximum"]; ok {
+			t.Fatalf("score schema should not include maximum: %#v", score)
+		}
+		if got := score["type"]; got != "number" {
+			t.Fatalf("score type got=%v want=number", got)
+		}
+		issues, ok := properties["issues"].(map[string]any)
+		if !ok {
+			t.Fatalf("issues schema type got=%T", properties["issues"])
+		}
+		items, ok := issues["items"].(map[string]any)
+		if !ok {
+			t.Fatalf("issues items type got=%T", issues["items"])
+		}
+		itemProperties, ok := items["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("issues item properties type got=%T", items["properties"])
+		}
+		severity, ok := itemProperties["severity"].(map[string]any)
+		if !ok {
+			t.Fatalf("severity schema type got=%T", itemProperties["severity"])
+		}
+		if _, ok := severity["minimum"]; ok {
+			t.Fatalf("nested severity schema should not include minimum: %#v", severity)
+		}
+		if _, ok := severity["maximum"]; ok {
+			t.Fatalf("nested severity schema should not include maximum: %#v", severity)
+		}
+		confidence, ok := properties["confidence"].(map[string]any)
+		if !ok {
+			t.Fatalf("confidence schema type got=%T", properties["confidence"])
+		}
+		anyOf, ok := confidence["anyOf"].([]any)
+		if !ok || len(anyOf) == 0 {
+			t.Fatalf("confidence anyOf got=%#v", confidence["anyOf"])
+		}
+		numberBranch, ok := anyOf[0].(map[string]any)
+		if !ok {
+			t.Fatalf("confidence anyOf branch type got=%T", anyOf[0])
+		}
+		if _, ok := numberBranch["minimum"]; ok {
+			t.Fatalf("nested anyOf branch should not include minimum: %#v", numberBranch)
+		}
+		if _, ok := numberBranch["maximum"]; ok {
+			t.Fatalf("nested anyOf branch should not include maximum: %#v", numberBranch)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"claude-test",
+			"content":[{"type":"text","text":"{\"score\":0.8,\"reason\":\"relevant\"}"}]
+		}`))
+	}))
+	defer srv.Close()
+
+	_, err := EvaluateJSON(context.Background(), Config{
+		APIKey:  "anthropic-key",
+		Model:   "claude-test",
+		BaseURL: srv.URL,
+	}, wire.EvalRequest{
+		Metric:       "AnswerRelevancy",
+		Instructions: "sys",
+		UserPrompt:   "prompt",
+		Schema: json.RawMessage(`{
+			"type":"object",
+			"additionalProperties":false,
+			"required":["score","reason"],
+			"properties":{
+				"score":{"type":"number","minimum":0,"maximum":1},
+				"reason":{"type":"string"},
+				"issues":{
+					"type":"array",
+					"items":{
+						"type":"object",
+						"properties":{
+							"severity":{"type":"number","minimum":1,"maximum":5},
+							"label":{"type":"string"}
+						}
+					}
+				},
+				"confidence":{"anyOf":[{"type":"number","minimum":0,"maximum":1},{"type":"null"}]}
+			}
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("EvaluateJSON error: %v", err)
+	}
+}
+
 func TestEvaluateJSONStatusError(t *testing.T) {
 	t.Parallel()
 

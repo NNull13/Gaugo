@@ -1,4 +1,4 @@
-package ollama
+package local
 
 import (
 	"context"
@@ -17,19 +17,19 @@ import (
 	"github.com/nnull13/gaugo/internal/provider/wire/openai/responses"
 )
 
-// Mode selects the Ollama wire protocol.
+// Mode selects the local model service wire protocol.
 type Mode string
 
 const (
 	// ModeNative uses Ollama's native /api/chat endpoint.
 	ModeNative Mode = "native"
-	// ModeOpenAI uses Ollama's OpenAI-compatible endpoints.
+	// ModeOpenAI uses OpenAI-compatible local endpoints.
 	ModeOpenAI Mode = provider.OpenAI
-	// ModeAnthropic uses Ollama's Anthropic-compatible endpoint.
+	// ModeAnthropic uses an Anthropic-compatible local endpoint.
 	ModeAnthropic Mode = provider.Anthropic
 )
 
-// OpenAIEndpoint selects the OpenAI-compatible Ollama endpoint.
+// OpenAIEndpoint selects the OpenAI-compatible local endpoint.
 type OpenAIEndpoint string
 
 const (
@@ -39,7 +39,7 @@ const (
 	OpenAIEndpointResponses OpenAIEndpoint = provider.ResponsesWireName
 )
 
-// Config configures an Ollama judge.
+// Config configures a local model service judge.
 type Config struct {
 	APIKey               string
 	Model                string
@@ -54,13 +54,13 @@ type Config struct {
 	MaxResponseBody      int64
 }
 
-// Judge evaluates metric prompts with Ollama.
+// Judge evaluates metric prompts with a local model service.
 type Judge struct {
 	cfg  Config
 	mode Mode
 }
 
-// New returns a configured Ollama judge.
+// New returns a configured local judge.
 func New(cfg Config) (*Judge, error) {
 	mode, err := validateConfig(cfg)
 	if err != nil {
@@ -97,7 +97,7 @@ func (j *Judge) evalNative(ctx context.Context, req wire.EvalRequest) (gaugo.Jud
 	}
 	return gaugo.JudgeResponse{
 		RawJSON:  res.RawJSON,
-		Provider: provider.Ollama,
+		Provider: provider.Local,
 		Model:    res.Model,
 		Latency:  res.Latency,
 	}, nil
@@ -106,8 +106,8 @@ func (j *Judge) evalNative(ctx context.Context, req wire.EvalRequest) (gaugo.Jud
 func (j *Judge) evalOpenAI(ctx context.Context, req wire.EvalRequest) (gaugo.JudgeResponse, error) {
 	apiKey := strings.TrimSpace(j.cfg.APIKey)
 	if apiKey == "" {
-		// Ollama's local OpenAI-compatible endpoint accepts but ignores auth.
-		apiKey = provider.OllamaLocalAPIKey
+		// Local OpenAI-compatible endpoints commonly accept but ignore auth.
+		apiKey = provider.LocalAPIKey
 	}
 	endpoint := j.cfg.OpenAICompatEndpoint
 	if endpoint == "" {
@@ -121,9 +121,10 @@ func (j *Judge) evalOpenAI(ctx context.Context, req wire.EvalRequest) (gaugo.Jud
 	switch endpoint {
 	case OpenAIEndpointResponses:
 		res, err = responses.EvaluateJSON(ctx, responses.Config{
+			Provider:        provider.Local,
 			APIKey:          apiKey,
 			Model:           j.cfg.Model,
-			BaseURL:         defaultBaseURL(j.cfg.BaseURL) + provider.OpenAIV1Path,
+			BaseURL:         openAICompatBaseURL(j.cfg.BaseURL),
 			EndpointURL:     j.cfg.EndpointURL,
 			HTTPClient:      j.cfg.HTTPClient,
 			Retry:           request.ToRetry(j.cfg.Retry),
@@ -131,9 +132,10 @@ func (j *Judge) evalOpenAI(ctx context.Context, req wire.EvalRequest) (gaugo.Jud
 		}, req)
 	default:
 		res, err = chat.EvaluateJSON(ctx, chat.Config{
+			Provider:        provider.Local,
 			APIKey:          apiKey,
 			Model:           j.cfg.Model,
-			BaseURL:         defaultBaseURL(j.cfg.BaseURL) + provider.OpenAIV1Path,
+			BaseURL:         openAICompatBaseURL(j.cfg.BaseURL),
 			EndpointURL:     j.cfg.EndpointURL,
 			HTTPClient:      j.cfg.HTTPClient,
 			Retry:           request.ToRetry(j.cfg.Retry),
@@ -145,7 +147,7 @@ func (j *Judge) evalOpenAI(ctx context.Context, req wire.EvalRequest) (gaugo.Jud
 	}
 	return gaugo.JudgeResponse{
 		RawJSON:  res.RawJSON,
-		Provider: provider.Ollama,
+		Provider: provider.Local,
 		Model:    res.Model,
 		Latency:  res.Latency,
 	}, nil
@@ -154,7 +156,7 @@ func (j *Judge) evalOpenAI(ctx context.Context, req wire.EvalRequest) (gaugo.Jud
 func (j *Judge) evalAnthropic(ctx context.Context, req wire.EvalRequest) (gaugo.JudgeResponse, error) {
 	apiKey := strings.TrimSpace(j.cfg.APIKey)
 	if apiKey == "" {
-		apiKey = provider.OllamaLocalAPIKey
+		apiKey = provider.LocalAPIKey
 	}
 
 	res, err := messages.EvaluateJSON(ctx, messages.Config{
@@ -173,7 +175,7 @@ func (j *Judge) evalAnthropic(ctx context.Context, req wire.EvalRequest) (gaugo.
 	}
 	return gaugo.JudgeResponse{
 		RawJSON:  res.RawJSON,
-		Provider: provider.Ollama,
+		Provider: provider.Local,
 		Model:    res.Model,
 		Latency:  res.Latency,
 	}, nil
@@ -182,9 +184,17 @@ func (j *Judge) evalAnthropic(ctx context.Context, req wire.EvalRequest) (gaugo.
 func defaultBaseURL(baseURL string) string {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
-		return provider.OllamaLocalBaseURL
+		return provider.LocalBaseURL
 	}
 	return baseURL
+}
+
+func openAICompatBaseURL(baseURL string) string {
+	base := defaultBaseURL(baseURL)
+	if strings.HasSuffix(base, provider.OpenAIV1Path) {
+		return base
+	}
+	return base + provider.OpenAIV1Path
 }
 
 func normalizeMode(m Mode) (Mode, error) {
@@ -202,7 +212,7 @@ func normalizeMode(m Mode) (Mode, error) {
 	}
 }
 
-// Validate reports invalid Ollama configuration.
+// Validate reports invalid local provider configuration.
 func (cfg Config) Validate() error {
 	_, err := validateConfig(cfg)
 	return err
@@ -211,32 +221,32 @@ func (cfg Config) Validate() error {
 func validateConfig(cfg Config) (Mode, error) {
 	mode, err := normalizeMode(cfg.Mode)
 	if err != nil {
-		return "", provider.ConfigWrapError(provider.Ollama, err)
+		return "", provider.ConfigWrapError(provider.Local, err)
 	}
 
 	if err := validate.BaseURL(cfg.BaseURL); err != nil {
-		return "", provider.ConfigWrapError(provider.Ollama, err)
+		return "", provider.ConfigWrapError(provider.Local, err)
 	}
 	if err := validate.BaseURL(cfg.EndpointURL); err != nil {
-		return "", provider.ConfigFieldWrapError(provider.Ollama, provider.FieldEndpointURL, err)
+		return "", provider.ConfigFieldWrapError(provider.Local, provider.FieldEndpointURL, err)
 	}
 
 	if mode != ModeOpenAI && strings.TrimSpace(string(cfg.OpenAICompatEndpoint)) != "" {
-		return "", provider.ConfigError(provider.Ollama, provider.ConfigOpenAIEndpointRequiresMode)
+		return "", provider.ConfigError(provider.Local, provider.ConfigOpenAIEndpointRequiresMode)
 	}
 
 	if mode == ModeOpenAI {
 		switch cfg.OpenAICompatEndpoint {
 		case "", OpenAIEndpointChat, OpenAIEndpointResponses:
 		default:
-			return "", provider.ConfigErrorf(provider.Ollama, provider.ConfigUnsupportedOpenAIEndpoint, cfg.OpenAICompatEndpoint)
+			return "", provider.ConfigErrorf(provider.Local, provider.ConfigUnsupportedOpenAIEndpoint, cfg.OpenAICompatEndpoint)
 		}
 	}
 	if err := cfg.Retry.Validate(); err != nil {
-		return "", provider.ConfigWrapError(provider.Ollama, err)
+		return "", provider.ConfigWrapError(provider.Local, err)
 	}
 	if cfg.MaxResponseBody < 0 {
-		return "", provider.ConfigError(provider.Ollama, provider.ConfigMaxResponseBodyNonNegative)
+		return "", provider.ConfigError(provider.Local, provider.ConfigMaxResponseBodyNonNegative)
 	}
 
 	return mode, nil

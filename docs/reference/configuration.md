@@ -31,7 +31,7 @@ Invalid options fail early. `NewRunner` returns an error. `New(t, ...)` fails th
 gaugo.WithJudge(judge)
 ```
 
-Configures the LLM judge used by LLM-based metrics such as `Faithfulness` and `AnswerRelevancy`.
+Configures the LLM judge used by LLM-based metrics such as `ContextRelevancy`, `Faithfulness`, and `AnswerRelevancy`.
 
 `WithJudge` may receive any value that implements:
 
@@ -123,6 +123,45 @@ gaugo.DefaultRetryConfig()
 ```
 
 Zero values use defaults. Negative values are invalid. Providers retry transient HTTP statuses (`429`, `5xx`) and transient transport errors (for example timeout, EOF, and connection reset). `Retry-After` is honored and capped by `MaxDelay`.
+
+## Anthropic large-suite tuning
+
+For large RAG suites that use Anthropic as the judge, start conservative. A case
+with the full RAG triad can make one provider request per LLM-backed metric, so
+total request volume grows with `cases * metrics`.
+
+```go
+judge, err := anthropic.New(anthropic.Config{
+    APIKey:    os.Getenv("ANTHROPIC_API_KEY"),
+    Model:     "claude-sonnet-4-5",
+    MaxTokens: 1024,
+    HTTPClient: &http.Client{
+        Timeout: 45 * time.Second,
+    },
+    Retry: gaugo.RetryConfig{
+        MaxAttempts: 4,
+        BaseDelay:   250 * time.Millisecond,
+        MaxDelay:    8 * time.Second,
+    },
+})
+if err != nil {
+    return err
+}
+
+suite := gaugo.New(t,
+    gaugo.WithJudge(judge),
+    gaugo.WithParallelism(1),
+    gaugo.WithCaseTimeout(90*time.Second),
+)
+```
+
+Recommended starting points:
+
+- Use `WithParallelism(1)` or `WithParallelism(2)` for broad Anthropic suites, then raise it only after observing rate limits and latency.
+- Keep provider retries bounded; retrying `429` and `5xx` responses is useful, but high concurrency plus many retries can amplify load.
+- Set `HTTPClient.Timeout` for each provider request and `WithCaseTimeout` for the whole case. The case timeout must allow your `RunFunc` plus every metric for that case.
+- Increase `MaxTokens` if Anthropic reports truncated structured output, especially with long contexts or verbose metric reasons.
+- Prefer small PR suites and scheduled large suites so quality signal does not depend on an overloaded provider lane.
 
 ## Provider HTTP configuration
 

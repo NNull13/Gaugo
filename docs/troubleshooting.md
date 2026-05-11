@@ -4,6 +4,21 @@
 
 Use this page when a Gaugo integration fails, produces no metrics, or behaves differently between local runs and CI.
 
+## Operational failure or quality failure?
+
+Start by identifying which kind of failure you have:
+
+| Signal | Meaning |
+| --- | --- |
+| `Runner.Run` returned an error | The suite could not start or the reporter failed. |
+| `CaseResult.RunError` is set | Your application did not produce an answer for that case. |
+| `MetricResult` fails and `gaugo.MetricErrorInfo` returns metadata | The metric could not evaluate because of a judge, provider, timeout, parse, or config issue. |
+| `MetricResult` fails without `MetricErrorInfo` | The metric evaluated successfully and judged quality below threshold. |
+
+Treat the first three as operational failures. Treat the last one as a quality
+failure that should usually be fixed in retrieval, prompting, generation, or
+source content.
+
 ## `no effective metrics provided`
 
 Cause: the run has no `ExpectedContains` checks and no non-nil metrics.
@@ -75,7 +90,7 @@ suite.Case("pricing self serve", ...)
 
 ## LLM metric says a judge is required
 
-Cause: `Faithfulness` or `AnswerRelevancy` was used without `WithJudge`.
+Cause: `ContextRelevancy`, `Faithfulness`, or `AnswerRelevancy` was used without `WithJudge`.
 
 Fix:
 
@@ -109,7 +124,7 @@ See [Configuration](reference/configuration.md).
 
 ## Provider request failed
 
-Cause: network failure, timeout, rate limit, server error, or invalid credentials.
+Cause: network failure, timeout, rate limit, server error, or invalid credentials. This is an operational failure, not a quality score.
 
 Fix:
 
@@ -131,6 +146,45 @@ judge, err := openai.New(openai.Config{
         MaxDelay:    5 * time.Second,
     },
 })
+```
+
+## Anthropic large suite is slow or rate limited
+
+Cause: broad suites can create many judge requests. With the RAG triad, request
+volume is roughly `cases * 3`, and retries can increase that during provider
+incidents or rate limits.
+
+Fix:
+
+- Start with `WithParallelism(1)` or `WithParallelism(2)`.
+- Keep `RetryConfig` bounded and honor `Retry-After`.
+- Set `HTTPClient.Timeout` so one request cannot hang indefinitely.
+- Set `WithCaseTimeout` high enough for your `RunFunc` plus all metrics in the case.
+- Increase Anthropic `MaxTokens` if failures mention output truncation.
+- Move broad Anthropic suites to scheduled CI and keep PR suites smaller.
+
+```go
+judge, err := anthropic.New(anthropic.Config{
+    APIKey: os.Getenv("ANTHROPIC_API_KEY"),
+    HTTPClient: &http.Client{
+        Timeout: 45 * time.Second,
+    },
+    Retry: gaugo.RetryConfig{
+        MaxAttempts: 4,
+        BaseDelay:   250 * time.Millisecond,
+        MaxDelay:    8 * time.Second,
+    },
+    MaxTokens: 1024,
+})
+if err != nil {
+    t.Fatalf("anthropic judge config: %v", err)
+}
+
+suite := gaugo.New(t,
+    gaugo.WithJudge(judge),
+    gaugo.WithParallelism(1),
+    gaugo.WithCaseTimeout(90*time.Second),
+)
 ```
 
 ## Output truncated by token limit
@@ -188,5 +242,6 @@ Fix:
 - Pin provider model names.
 - Start with deterministic checks in required CI.
 - Run expensive LLM metrics in a scheduled or protected workflow.
+- Classify `MetricResult` failures with `gaugo.MetricErrorInfo` before treating them as quality regressions.
 
 See [CI Integration](guides/ci-integration.md) and [Production](guides/production.md).

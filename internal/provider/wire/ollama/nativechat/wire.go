@@ -3,7 +3,6 @@ package nativechat
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -38,31 +37,27 @@ type optionsBody struct {
 	Temperature int `json:"temperature"`
 }
 
-func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.EvalResult, error) {
-	var (
-		err    error
-		schema any
-		body   []byte
-		resp   wire.HTTPResponse
-	)
+const wireName = "ollama"
 
+func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.EvalResult, error) {
 	model := strings.TrimSpace(cfg.Model)
 	if model == "" {
-		model = provider.OllamaDefaultModel
+		model = provider.LocalDefaultModel
 	}
-	endpoint := endpointURL(cfg.EndpointURL, cfg.BaseURL, provider.OllamaLocalBaseURL, provider.OllamaNativeChatPath)
+	endpoint := wire.EndpointURL(cfg.EndpointURL, cfg.BaseURL, provider.LocalBaseURL, provider.OllamaNativeChatPath)
 
-	schema, err = wire.DecodeSchema(req.Schema)
+	schema, err := wire.DecodeSchema(req.Schema)
 	if err != nil {
 		return wire.EvalResult{}, err
 	}
 
+	var body []byte
 	body, err = json.Marshal(requestBody{
 		Model:  model,
 		Stream: false,
 		Messages: []message{
-			{Role: "system", Content: req.Instructions},
-			{Role: "user", Content: req.UserPrompt},
+			{Role: wire.RoleSystem, Content: req.Instructions},
+			{Role: wire.RoleUser, Content: req.UserPrompt},
 		},
 		Format: schema,
 		Options: optionsBody{
@@ -70,7 +65,7 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		},
 	})
 	if err != nil {
-		return wire.EvalResult{}, fmt.Errorf("marshal ollama request: %w", err)
+		return wire.EvalResult{}, wire.MarshalRequestError(wireName, err)
 	}
 
 	headers := map[string]string{
@@ -80,15 +75,16 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		headers[wire.HeaderAuthorization] = wire.AuthBearerPrefix + apiKey
 	}
 
+	var resp wire.HTTPResponse
 	resp, err = wire.PostJSONWithOptions(ctx, wire.NewHTTPClient(cfg.HTTPClient), endpoint, headers, body, wire.HTTPOptions{
 		Retry:        cfg.Retry,
 		MaxBodyBytes: cfg.MaxResponseBody,
 	})
 	if err != nil {
-		return wire.EvalResult{}, fmt.Errorf("ollama judge request failed: %w", err)
+		return wire.EvalResult{}, wire.JudgeRequestError(wireName, err)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
-		return wire.EvalResult{}, wire.StatusError(provider.Ollama, resp)
+		return wire.EvalResult{}, wire.StatusError(provider.Local, resp)
 	}
 
 	var parsed struct {
@@ -99,16 +95,16 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 	}
 	err = json.Unmarshal(resp.Body, &parsed)
 	if err != nil {
-		return wire.EvalResult{}, fmt.Errorf("decode ollama response: %w", err)
+		return wire.EvalResult{}, wire.DecodeResponseWrapError(wireName, err)
 	}
 
 	content := wire.StripCodeFence(parsed.Message.Content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, fmt.Errorf("decode ollama response: empty message content")
+		return wire.EvalResult{}, wire.DecodeResponseError(wireName, "empty message content")
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, fmt.Errorf("decode ollama response: invalid json payload")
+		return wire.EvalResult{}, wire.DecodeResponseError(wireName, wire.ErrInvalidJSONPayload)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)
@@ -122,15 +118,4 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		Latency:   resp.Latency,
 		RequestID: wire.RequestID(resp.Header),
 	}, nil
-}
-
-func endpointURL(endpointURL, baseURL, defaultBaseURL, path string) string {
-	if endpoint := strings.TrimSpace(endpointURL); endpoint != "" {
-		return endpoint
-	}
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if base == "" {
-		base = defaultBaseURL
-	}
-	return base + path
 }

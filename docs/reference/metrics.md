@@ -15,6 +15,22 @@ type Metric interface {
 
 Metrics run after your `RunFunc` returns an `Output`. Built-in LLM metrics call the configured `Judge` and parse strictly structured JSON.
 
+## RAG quality triad
+
+For retrieval-augmented generation, treat the built-in RAG metrics as three
+separate questions:
+
+| Metric | What it checks | Typical failure it isolates |
+| --- | --- | --- |
+| `ContextRelevancy` | Are the retrieved context documents useful for the question? | Retrieval returned irrelevant, noisy, or incomplete evidence. |
+| `Faithfulness` | Is the answer supported by the context documents? | The model added unsupported claims or contradicted evidence. |
+| `AnswerRelevancy` | Does the answer address the user's question? | The answer is grounded but incomplete, evasive, or off-topic. |
+
+Use the three together when you need to tell retrieval problems apart from
+generation problems. For example, low `ContextRelevancy` usually points at the
+retriever or corpus, while high `ContextRelevancy` with low `Faithfulness`
+usually points at answer generation.
+
 ## ExpectedContains
 
 `ExpectedContains` is a deterministic case check, not a value you pass as a `Metric`.
@@ -38,6 +54,23 @@ Behavior:
 - Does not require an LLM judge.
 
 Use it for hard product contracts: required disclaimers, exact terms, expected support channels, or smoke tests.
+
+## ContextRelevancy
+
+```go
+suite.Assert(ctx, yourGaugoEvaluation, gaugo.ContextRelevancy())
+```
+
+`ContextRelevancy` scores whether the case context documents are relevant to
+the input question. It requires a configured `Judge`.
+
+The metric asks the judge to score each non-empty context document against the
+question while ignoring the generated answer. The final score is the average
+document relevance score; an empty context scores `0`.
+
+Use it for RAG systems when you want to evaluate retrieval quality separately
+from answer generation. A low score means the generated answer may be poor even
+if the model behaved reasonably with the evidence it received.
 
 ## Faithfulness
 
@@ -80,6 +113,7 @@ Built-in LLM metrics default to a pass threshold of `0.7`.
 
 ```go
 suite.Assert(ctx, yourGaugoEvaluation,
+    gaugo.ContextRelevancy(gaugo.WithThreshold(0.75)),
     gaugo.Faithfulness(gaugo.WithThreshold(0.9)),
     gaugo.AnswerRelevancy(gaugo.WithThreshold(0.8)),
 )
@@ -101,6 +135,7 @@ suite.Case("refunds",
 )
 
 suite.Assert(ctx, yourGaugoEvaluation,
+    gaugo.ContextRelevancy(),
     gaugo.Faithfulness(gaugo.WithThreshold(0.95)),
     gaugo.AnswerRelevancy(),
 )
@@ -118,6 +153,7 @@ This prevents test suites that pass without evaluating anything.
 ## Tips
 
 - Start with `ExpectedContains` for cheap smoke coverage.
+- Add `ContextRelevancy` when retrieval quality is part of the release risk.
 - Add `Faithfulness` before shipping RAG changes.
 - Add `AnswerRelevancy` for user-facing answer quality.
 - Use stricter thresholds in CI than in exploratory local runs.

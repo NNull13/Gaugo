@@ -84,5 +84,18 @@ func Assert(t testing.TB, result RunResult) {
 }
 
 func metricFailureMetadata(m MetricResult) string {
-	return fmt.Sprintf("details_bytes=%d", len(m.Details))
+	metadata := fmt.Sprintf("details_bytes=%d", len(m.Details))
+	if info, ok := MetricErrorInfo(m); ok {
+		metadata += fmt.Sprintf(" error_kind=%q", info.Kind)
+		if info.Provider != "" {
+			metadata += fmt.Sprintf(" provider=%q", info.Provider)
+		}
+		if info.StatusCode != 0 {
+			metadata += fmt.Sprintf(" status_code=%d", info.StatusCode)
+		}
+		if info.RequestID != "" {
+			metadata += fmt.Sprintf(" request_id=%q", info.RequestID)
+		}
+	}
+	return metadata
 }

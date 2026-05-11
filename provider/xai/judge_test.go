@@ -155,6 +155,52 @@ func TestEvaluateJSONChatCompletions(t *testing.T) {
 	}
 }
 
+func TestEvaluateJSONStatusErrorClassifiesXAIProvider(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		useChat bool
+	}{
+		{name: "responses"},
+		{name: "chat", useChat: true},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("x-request-id", "req_xai")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":"rate limited"}`))
+			}))
+			defer srv.Close()
+
+			j, err := New(Config{
+				APIKey:             "xai-key",
+				EndpointURL:        srv.URL,
+				UseChatCompletions: tc.useChat,
+				AllowUnsafeURL:     true,
+			})
+			if err != nil {
+				t.Fatalf("New error: %v", err)
+			}
+
+			_, err = j.EvaluateJSON(context.Background(), sampleReq())
+			if err == nil {
+				t.Fatalf("expected error")
+			}
+			info := gaugo.ClassifyError(err)
+			if info.Kind != gaugo.ErrorKindProviderRateLimit || info.Provider != "xai" ||
+				info.StatusCode != http.StatusTooManyRequests || info.RequestID != "req_xai" {
+				t.Fatalf("unexpected error info: %+v", info)
+			}
+		})
+	}
+}
+
 func sampleReq() gaugo.JudgeRequest {
 	return gaugo.JudgeRequest{
 		Metric:       "Faithfulness",

@@ -60,6 +60,11 @@ func ContextDocs(docs ...Document) CaseOption {
 	}
 }
 
+// Doc is a convenience constructor for Document.
+func Doc(id, text string) Document {
+	return Document{ID: id, Text: text}
+}
+
 // ExpectedContains requires the output answer to contain the given substring.
 func ExpectedContains(substr string) CaseOption {
 	return func(c *Case) {

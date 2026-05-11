@@ -1,4 +1,4 @@
-package ollama
+package local
 
 import (
 	"context"
@@ -33,6 +33,9 @@ func TestModeNative(t *testing.T) {
 	}
 	if got, want := strings.TrimSpace(string(res.RawJSON)), `{"mode":"native"}`; got != want {
 		t.Fatalf("raw json got=%q want=%q", got, want)
+	}
+	if got, want := res.Provider, "local"; got != want {
+		t.Fatalf("provider got=%q want=%q", got, want)
 	}
 }
 
@@ -91,6 +94,35 @@ func TestModeOpenAIResponses(t *testing.T) {
 	}
 }
 
+func TestModeOpenAIBaseURLWithV1PathDoesNotDuplicate(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.Path, "/v1/chat/completions"; got != want {
+			t.Fatalf("path got=%q want=%q", got, want)
+		}
+		_, _ = w.Write([]byte(`{"model":"chat-model","choices":[{"message":{"content":"{\"mode\":\"openai_chat\"}"}}]}`))
+	}))
+	defer srv.Close()
+
+	j, err := New(Config{
+		Mode:                 ModeOpenAI,
+		OpenAICompatEndpoint: OpenAIEndpointChat,
+		BaseURL:              srv.URL + "/v1",
+		Model:                "chat-model",
+	})
+	if err != nil {
+		t.Fatalf("New error: %v", err)
+	}
+	res, err := j.EvaluateJSON(context.Background(), sampleJudgeRequest())
+	if err != nil {
+		t.Fatalf("EvaluateJSON error: %v", err)
+	}
+	if got, want := strings.TrimSpace(string(res.RawJSON)), `{"mode":"openai_chat"}`; got != want {
+		t.Fatalf("raw json got=%q want=%q", got, want)
+	}
+}
+
 func TestModeAnthropic(t *testing.T) {
 	t.Parallel()
 
@@ -123,7 +155,7 @@ func TestInvalidMode(t *testing.T) {
 	t.Parallel()
 
 	_, err := New(Config{Mode: Mode("invalid")})
-	if err == nil || !strings.Contains(err.Error(), "invalid ollama config") {
+	if err == nil || !strings.Contains(err.Error(), "invalid local config") {
 		t.Fatalf("expected invalid config error, got: %v", err)
 	}
 }
@@ -135,7 +167,7 @@ func TestInvalidOpenAIEndpoint(t *testing.T) {
 		Mode:                 ModeOpenAI,
 		OpenAICompatEndpoint: OpenAIEndpoint("bad"),
 	})
-	if err == nil || !strings.Contains(err.Error(), "invalid ollama config") {
+	if err == nil || !strings.Contains(err.Error(), "invalid local config") {
 		t.Fatalf("expected invalid config error, got: %v", err)
 	}
 }
@@ -147,7 +179,7 @@ func TestOpenAIEndpointRequiresModeOpenAI(t *testing.T) {
 		Mode:                 ModeNative,
 		OpenAICompatEndpoint: OpenAIEndpointResponses,
 	})
-	if err == nil || !strings.Contains(err.Error(), "invalid ollama config") {
+	if err == nil || !strings.Contains(err.Error(), "invalid local config") {
 		t.Fatalf("expected invalid config error, got: %v", err)
 	}
 }
@@ -159,7 +191,7 @@ func TestInvalidBaseURL(t *testing.T) {
 		Mode:    ModeNative,
 		BaseURL: "://bad",
 	})
-	if err == nil || !strings.Contains(err.Error(), "invalid ollama config") {
+	if err == nil || !strings.Contains(err.Error(), "invalid local config") {
 		t.Fatalf("expected invalid config error, got: %v", err)
 	}
 }

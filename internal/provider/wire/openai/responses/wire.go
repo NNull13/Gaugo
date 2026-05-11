@@ -14,6 +14,7 @@ import (
 const wireName = provider.ResponsesWireName
 
 type Config struct {
+	Provider        string
 	APIKey          string
 	Model           string
 	BaseURL         string
@@ -47,35 +48,30 @@ type schemaFormat struct {
 }
 
 func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.EvalResult, error) {
-	var (
-		err    error
-		schema any
-		body   []byte
-		resp   wire.HTTPResponse
-	)
-
+	providerName := wire.ProviderLabel(cfg.Provider, provider.OpenAI)
 	apiKey := strings.TrimSpace(cfg.APIKey)
 	if apiKey == "" {
-		return wire.EvalResult{}, provider.APIKeyRequiredError()
+		return wire.EvalResult{}, provider.ProviderAPIKeyRequiredError(providerName)
 	}
 
 	model := strings.TrimSpace(cfg.Model)
 	if model == "" {
 		model = provider.OpenAIDefaultModel
 	}
-	endpoint := endpointURL(cfg.EndpointURL, cfg.BaseURL, provider.OpenAIBaseURL, provider.ResponsesPath)
+	endpoint := wire.EndpointURL(cfg.EndpointURL, cfg.BaseURL, provider.OpenAIBaseURL, provider.ResponsesPath)
 
-	schema, err = wire.DecodeSchema(req.Schema)
+	schema, err := wire.DecodeSchema(req.Schema)
 	if err != nil {
 		return wire.EvalResult{}, err
 	}
 
+	var body []byte
 	body, err = json.Marshal(requestBody{
 		Model:       model,
 		Temperature: 0,
 		Input: []inputMessage{
-			{Role: "system", Content: req.Instructions},
-			{Role: "user", Content: req.UserPrompt},
+			{Role: wire.RoleSystem, Content: req.Instructions},
+			{Role: wire.RoleUser, Content: req.UserPrompt},
 		},
 		Text: textInstruction{
 			Format: schemaFormat{
@@ -87,18 +83,19 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		},
 	})
 	if err != nil {
-		return wire.EvalResult{}, fmt.Errorf("marshal responses request: %w", err)
+		return wire.EvalResult{}, wire.MarshalRequestError(wireName, err)
 	}
 
+	var resp wire.HTTPResponse
 	resp, err = wire.PostJSONWithOptions(ctx, wire.NewHTTPClient(cfg.HTTPClient), endpoint, map[string]string{
 		wire.HeaderAuthorization: wire.AuthBearerPrefix + apiKey,
 		wire.HeaderContentType:   wire.ContentTypeJSON,
 	}, body, wire.HTTPOptions{Retry: cfg.Retry, MaxBodyBytes: cfg.MaxResponseBody})
 	if err != nil {
-		return wire.EvalResult{}, fmt.Errorf("%s judge request failed: %w", wireName, err)
+		return wire.EvalResult{}, wire.JudgeRequestError(wireName, err)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
-		return wire.EvalResult{}, wire.StatusError(wireName, resp)
+		return wire.EvalResult{}, wire.StatusErrorForWire(providerName, wireName, resp)
 	}
 
 	var parsed struct {
@@ -119,14 +116,14 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 	}
 	err = json.Unmarshal(resp.Body, &parsed)
 	if err != nil {
-		return wire.EvalResult{}, fmt.Errorf("decode responses response: %w", err)
+		return wire.EvalResult{}, wire.DecodeResponseWrapError(wireName, err)
 	}
 	if strings.EqualFold(parsed.Status, "incomplete") {
 		reason := strings.TrimSpace(parsed.IncompleteDetails.Reason)
 		if reason == "" {
 			reason = "unknown"
 		}
-		return wire.EvalResult{}, fmt.Errorf("decode responses response: incomplete output reason=%q", reason)
+		return wire.EvalResult{}, wire.DecodeResponseError(wireName, fmt.Sprintf("incomplete output reason=%q", reason))
 	}
 
 	content := strings.TrimSpace(parsed.OutputText)
@@ -135,11 +132,11 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 	}
 	content = wire.StripCodeFence(content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, fmt.Errorf("decode responses response: empty output text")
+		return wire.EvalResult{}, wire.DecodeResponseError(wireName, "empty output text")
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, fmt.Errorf("decode responses response: invalid json payload")
+		return wire.EvalResult{}, wire.DecodeResponseError(wireName, wire.ErrInvalidJSONPayload)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)
@@ -153,17 +150,6 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		Latency:   resp.Latency,
 		RequestID: wire.RequestID(resp.Header),
 	}, nil
-}
-
-func endpointURL(endpointURL, baseURL, defaultBaseURL, path string) string {
-	if endpoint := strings.TrimSpace(endpointURL); endpoint != "" {
-		return endpoint
-	}
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if base == "" {
-		base = defaultBaseURL
-	}
-	return base + path
 }
 
 func extractOutputText(out []struct {

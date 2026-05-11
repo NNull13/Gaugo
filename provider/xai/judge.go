@@ -51,6 +51,7 @@ func (j *Judge) EvaluateJSON(ctx context.Context, req gaugo.JudgeRequest) (gaugo
 
 func (j *Judge) evalResponses(ctx context.Context, req wire.EvalRequest) (gaugo.JudgeResponse, error) {
 	res, err := responses.EvaluateJSON(ctx, responses.Config{
+		Provider:        provider.XAI,
 		APIKey:          j.cfg.APIKey,
 		Model:           defaultModel(j.cfg.Model),
 		BaseURL:         defaultBaseURL(j.cfg.BaseURL),
@@ -72,6 +73,7 @@ func (j *Judge) evalResponses(ctx context.Context, req wire.EvalRequest) (gaugo.
 
 func (j *Judge) evalChat(ctx context.Context, req wire.EvalRequest) (gaugo.JudgeResponse, error) {
 	res, err := chat.EvaluateJSON(ctx, chat.Config{
+		Provider:        provider.XAI,
 		APIKey:          j.cfg.APIKey,
 		Model:           defaultModel(j.cfg.Model),
 		BaseURL:         defaultBaseURL(j.cfg.BaseURL),

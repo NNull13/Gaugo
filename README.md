@@ -16,7 +16,9 @@
 
 Gaugo lets Go teams evaluate RAG systems, agents, chatbots, and other AI-backed
 services with deterministic test cases, optional LLM judges, concurrent
-execution, and structured results that fit naturally into CI.
+execution, and structured results that fit naturally into CI. For RAG systems,
+Gaugo is organized around the familiar quality triad: `ContextRelevancy`,
+`Faithfulness`, and `AnswerRelevancy`.
 
 ```sh
 go get github.com/nnull13/gaugo
@@ -29,9 +31,9 @@ go get github.com/nnull13/gaugo
 | Native Go tests | Write AI evaluations as normal `testing` tests. |
 | Deterministic reporting | Run cases concurrently while preserving registration order. |
 | No-LLM checks | Catch required behavior with cheap `ExpectedContains` assertions. |
-| LLM-judged metrics | Use structured-output judges for faithfulness and answer relevancy. |
+| LLM-judged RAG metrics | Use structured-output judges for context relevancy, faithfulness, and answer relevancy. |
 | Programmatic runs | Use `Runner` to feed dashboards, CLIs, and internal pipelines. |
-| Provider adapters | Start with OpenAI, Anthropic, Gemini, xAI, or Ollama. |
+| Provider adapters | Start with OpenAI, Anthropic, Gemini, xAI, or a local model service. |
 | Extension points | Bring your own judge, metric, or reporter. |
 
 ## Quickstart (No Provider Needed)
@@ -119,6 +121,7 @@ func TestRAGQuality(t *testing.T) {
 	)
 
 	suite.Assert(context.Background(), yourGaugoEvaluation,
+		gaugo.ContextRelevancy(gaugo.WithThreshold(0.75)),
 		gaugo.Faithfulness(gaugo.WithThreshold(0.8)),
 		gaugo.AnswerRelevancy(gaugo.WithThreshold(0.7)),
 	)
@@ -139,6 +142,14 @@ func yourGaugoEvaluation(ctx context.Context, in gaugo.Input) (gaugo.Output, err
 }
 ```
 
+## Go-native positioning
+
+Python-first evaluation frameworks such as Ragas, DeepEval, and TruLens are good
+options when your eval stack already lives in notebooks, Python services, or
+dedicated observability platforms. Gaugo's narrower focus is Go-native
+evaluation: keep cases beside Go application code, run them with `go test`, and
+send structured results to the CI and reporting systems your team already uses.
+
 ## Docs & Next Steps
 
 | I want to... | Go to |
@@ -149,7 +160,7 @@ func yourGaugoEvaluation(ctx context.Context, in gaugo.Input) (gaugo.Output, err
 | Use Gaugo inside `go test` | [Testing with Suite](docs/guides/testing-with-suite.md) |
 | Run evaluations from a CLI or pipeline | [Programmatic Runner](docs/guides/programmatic-runner.md) |
 | Configure metrics and thresholds | [Metrics reference](docs/reference/metrics.md) |
-| Choose and configure an LLM provider | [Provider index (OpenAI, Anthropic, Gemini, xAI, Ollama)](docs/provider/index.md) |
+| Choose and configure an LLM provider | [Provider index (OpenAI, Anthropic, Gemini, xAI, Local)](docs/provider/index.md) |
 | Add a custom judge, metric, or reporter | [Extending Gaugo](docs/extending/custom-judges.md) |
 | Debug a failure | [Troubleshooting](docs/troubleshooting.md) |
 

@@ -34,6 +34,23 @@ const (
 	AuthBearerPrefix     = "Bearer "
 	ContentTypeJSON      = "application/json"
 	SchemaTypeJSONSchema = "json_schema"
+
+	RoleSystem = "system"
+	RoleUser   = "user"
+)
+
+const (
+	errorKindUnknown             = "unknown"
+	errorKindProviderRequest     = "provider_request"
+	errorKindProviderAuth        = "provider_auth"
+	errorKindProviderRateLimit   = "provider_rate_limit"
+	errorKindProviderUnavailable = "provider_unavailable"
+)
+
+// Common error detail strings used by wire sub-packages.
+const (
+	ErrInvalidJSONPayload = "invalid json payload"
+	ErrRefusal            = "model refusal"
 )
 
 var (
@@ -141,19 +158,66 @@ type HTTPResponse struct {
 // HTTPStatusError reports a non-success provider HTTP response without exposing the body.
 type HTTPStatusError struct {
 	Provider   string
+	Wire       string
 	StatusCode int
 	RequestID  string
 	BodyLen    int
 }
 
 func (e *HTTPStatusError) Error() string {
+	label := strings.TrimSpace(e.Provider)
+	if wire := strings.TrimSpace(e.Wire); wire != "" {
+		if label == "" {
+			label = wire
+		} else {
+			label += "/" + wire
+		}
+	}
+	if label == "" {
+		label = "provider"
+	}
 	return fmt.Sprintf(
 		"%s request failed status=%d request_id=%q body=redacted(len=%d)",
-		e.Provider,
+		label,
 		e.StatusCode,
 		e.RequestID,
 		e.BodyLen,
 	)
+}
+
+func (e *HTTPStatusError) GaugoErrorKind() string {
+	switch {
+	case e.StatusCode == http.StatusTooManyRequests:
+		return errorKindProviderRateLimit
+	case e.StatusCode == http.StatusUnauthorized || e.StatusCode == http.StatusForbidden:
+		return errorKindProviderAuth
+	case e.StatusCode >= http.StatusBadRequest && e.StatusCode < http.StatusInternalServerError:
+		return errorKindProviderRequest
+	case e.StatusCode >= http.StatusInternalServerError:
+		return errorKindProviderUnavailable
+	default:
+		return errorKindUnknown
+	}
+}
+
+func (e *HTTPStatusError) GaugoProvider() string {
+	return strings.TrimSpace(e.Provider)
+}
+
+func (e *HTTPStatusError) GaugoWire() string {
+	return strings.TrimSpace(e.Wire)
+}
+
+func (e *HTTPStatusError) GaugoStatusCode() int {
+	return e.StatusCode
+}
+
+func (e *HTTPStatusError) GaugoRequestID() string {
+	return strings.TrimSpace(e.RequestID)
+}
+
+func (e *HTTPStatusError) GaugoBodyBytes() int {
+	return e.BodyLen
 }
 
 func PostJSON(ctx context.Context, client *http.Client, url string, headers map[string]string, body []byte) (HTTPResponse, error) {
@@ -168,7 +232,8 @@ func PostJSONWithOptions(ctx context.Context, client *http.Client, url string, h
 		resp, err := postJSONOnce(ctx, client, url, headers, body, opts.MaxBodyBytes)
 		if err != nil {
 			if retryableTransportError(err) && attempt < opts.Retry.MaxAttempts {
-				if err := sleepRetry(ctx, retryDelay(nil, opts.Retry, attempt)); err != nil {
+				err = sleepRetry(ctx, retryDelay(nil, opts.Retry, attempt))
+				if err != nil {
 					return last, err
 				}
 				continue
@@ -179,7 +244,8 @@ func PostJSONWithOptions(ctx context.Context, client *http.Client, url string, h
 		if !retryableStatus(resp.StatusCode) || attempt == opts.Retry.MaxAttempts {
 			return resp, nil
 		}
-		if err := sleepRetry(ctx, retryDelay(resp.Header, opts.Retry, attempt)); err != nil {
+		err = sleepRetry(ctx, retryDelay(resp.Header, opts.Retry, attempt))
+		if err != nil {
 			return last, err
 		}
 	}
@@ -203,13 +269,16 @@ func postJSONOnce(ctx context.Context, client *http.Client, url string, headers 
 	}
 
 	start := time.Now()
-	resp, err := client.Do(req)
+
+	var resp *http.Response
+	resp, err = client.Do(req)
 	if err != nil {
 		return HTTPResponse{}, fmt.Errorf("execute request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, err := readLimited(resp.Body, maxBodyBytes)
+	var respBody []byte
+	respBody, err = readLimited(resp.Body, maxBodyBytes)
 	if err != nil {
 		return HTTPResponse{}, err
 	}
@@ -222,9 +291,51 @@ func postJSONOnce(ctx context.Context, client *http.Client, url string, headers 
 	}, nil
 }
 
-func StatusErrorFor(provider string, resp HTTPResponse) error {
+// EndpointURL resolves the final URL from explicit endpoint, base URL, default base, and path.
+func EndpointURL(endpointURL, baseURL, defaultBaseURL, path string) string {
+	if endpoint := strings.TrimSpace(endpointURL); endpoint != "" {
+		return endpoint
+	}
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if base == "" {
+		base = defaultBaseURL
+	}
+	return base + path
+}
+
+// ProviderLabel returns configured if non-empty, otherwise fallback.
+func ProviderLabel(configured, fallback string) string {
+	configured = strings.TrimSpace(configured)
+	if configured != "" {
+		return configured
+	}
+	return fallback
+}
+
+// MarshalRequestError returns a formatted marshal error for a wire request.
+func MarshalRequestError(label string, err error) error {
+	return fmt.Errorf("marshal %s request: %w", label, err)
+}
+
+// DecodeResponseError returns a formatted decode error with a detail message.
+func DecodeResponseError(label, detail string) error {
+	return fmt.Errorf("decode %s response: %s", label, detail)
+}
+
+// DecodeResponseWrapError returns a formatted decode error wrapping an underlying error.
+func DecodeResponseWrapError(label string, err error) error {
+	return fmt.Errorf("decode %s response: %w", label, err)
+}
+
+// JudgeRequestError returns a formatted judge request failure error.
+func JudgeRequestError(label string, err error) error {
+	return fmt.Errorf("%s judge request failed: %w", label, err)
+}
+
+func StatusErrorForWire(provider, wire string, resp HTTPResponse) error {
 	return &HTTPStatusError{
 		Provider:   provider,
+		Wire:       wire,
 		StatusCode: resp.StatusCode,
 		RequestID:  RequestID(resp.Header),
 		BodyLen:    len(resp.Body),
@@ -232,7 +343,7 @@ func StatusErrorFor(provider string, resp HTTPResponse) error {
 }
 
 func StatusError(provider string, resp HTTPResponse) error {
-	return StatusErrorFor(provider, resp)
+	return StatusErrorForWire(provider, "", resp)
 }
 
 func RequestID(h http.Header) string {
@@ -258,9 +369,32 @@ func StripCodeFence(s string) string {
 }
 
 func NormalizeSchemaName(metric string) string {
-	name := strings.ToLower(strings.TrimSpace(metric))
-	name = strings.ReplaceAll(name, " ", "_")
-	name = strings.ReplaceAll(name, "-", "_")
+	const maxSchemaNameLen = 64
+
+	var b strings.Builder
+	lastSeparator := false
+	for _, r := range strings.ToLower(strings.TrimSpace(metric)) {
+		if b.Len() >= maxSchemaNameLen {
+			break
+		}
+
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteByte(byte(r))
+			lastSeparator = false
+		case r >= '0' && r <= '9':
+			b.WriteByte(byte(r))
+			lastSeparator = false
+		default:
+			if b.Len() == 0 || lastSeparator || b.Len() == maxSchemaNameLen-1 {
+				continue
+			}
+			b.WriteByte('_')
+			lastSeparator = true
+		}
+	}
+
+	name := strings.Trim(b.String(), "_-")
 	if name == "" {
 		return "gaugo_metric"
 	}

@@ -11,7 +11,7 @@ Run deterministic checks on every pull request. Run LLM-backed checks on a slowe
 | Lane | Checks | Cost | Stability | Suggested trigger |
 | --- | --- | --- | --- | --- |
 | Fast PR | `ExpectedContains`, unit tests | Low | High | Every push |
-| Quality PR | `Faithfulness`, `AnswerRelevancy` on a small suite | Medium | Medium | Label, protected branch, or merge queue |
+| Quality PR | `ContextRelevancy`, `Faithfulness`, `AnswerRelevancy` on a small suite | Medium | Medium | Label, protected branch, or merge queue |
 | Nightly | Larger semantic suite | Higher | Medium | Scheduled |
 | Release | Critical eval suite | Higher | High signal | Before tag or deploy |
 
@@ -97,6 +97,7 @@ func TestRAGQuality(t *testing.T) {
 	)
 
 	suite.Assert(context.Background(), yourGaugoEvaluation,
+		gaugo.ContextRelevancy(gaugo.WithThreshold(0.75)),
 		gaugo.Faithfulness(gaugo.WithThreshold(0.8)),
 		gaugo.AnswerRelevancy(gaugo.WithThreshold(0.7)),
 	)
@@ -111,7 +112,8 @@ Provider-backed metrics multiply quickly:
 provider calls = cases * LLM-backed metrics
 ```
 
-For 50 cases with `Faithfulness` and `AnswerRelevancy`, expect 100 judge requests.
+For 50 cases with the full RAG triad (`ContextRelevancy`, `Faithfulness`, and
+`AnswerRelevancy`), expect 150 judge requests.
 
 Use:
 
@@ -120,6 +122,34 @@ Use:
 - Provider `RetryConfig` to handle transient `429`/`5xx` responses and transient transport failures.
 - Smaller PR suites for fast feedback.
 - Nightly jobs for broad coverage.
+
+For large Anthropic-backed suites, start with `WithParallelism(1)` or
+`WithParallelism(2)`, bounded retries, and an explicit provider HTTP timeout.
+Make the case timeout large enough for your application call plus every metric
+call in that case.
+
+```go
+judge, err := anthropic.New(anthropic.Config{
+	APIKey: os.Getenv("ANTHROPIC_API_KEY"),
+	HTTPClient: &http.Client{
+		Timeout: 45 * time.Second,
+	},
+	Retry: gaugo.RetryConfig{
+		MaxAttempts: 4,
+		BaseDelay:   250 * time.Millisecond,
+		MaxDelay:    8 * time.Second,
+	},
+})
+if err != nil {
+	t.Fatalf("anthropic judge config: %v", err)
+}
+
+suite := gaugo.New(t,
+	gaugo.WithJudge(judge),
+	gaugo.WithParallelism(1),
+	gaugo.WithCaseTimeout(90*time.Second),
+)
+```
 
 ## Use tags for expensive tests
 
@@ -144,6 +174,7 @@ Use `NewRunner` when CI needs JSON artifacts or custom pass/fail rules.
 ```go
 func runEvals(ctx context.Context, runner *gaugo.Runner, yourGaugoEvaluation gaugo.RunFunc) error {
 	result, err := runner.Run(ctx, yourGaugoEvaluation,
+		gaugo.ContextRelevancy(gaugo.WithThreshold(0.75)),
 		gaugo.Faithfulness(gaugo.WithThreshold(0.8)),
 		gaugo.AnswerRelevancy(gaugo.WithThreshold(0.7)),
 	)
@@ -173,6 +204,12 @@ func hasFailures(result gaugo.RunResult) bool {
 }
 ```
 
+CI usually benefits from separating operational failures from quality failures.
+Retry or quarantine provider outages, rate limits, and parse failures; fail the
+quality gate when the application returned an answer and a metric score missed
+its threshold. Use `CaseResult.RunError` and `gaugo.MetricErrorInfo` for that
+split. See [Results and Reporting](../reference/results-and-reporting.md).
+
 See [Programmatic Runner](programmatic-runner.md) for a full example.
 
 ## CI checklist
@@ -181,6 +218,7 @@ See [Programmatic Runner](programmatic-runner.md) for a full example.
 - Put provider keys in CI secrets only.
 - Skip LLM tests when secrets are absent unless the job explicitly requires them.
 - Cap parallelism to stay under provider limits.
+- Separate operational failures from quality failures in dashboards and rerun policies.
 - Use stable case names so failures can be tracked over time.
 - Store full results from `Runner` when you need trend analysis.
 - Keep metric details bounded with `WithMetricDetailsLimit`.

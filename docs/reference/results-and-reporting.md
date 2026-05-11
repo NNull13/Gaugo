@@ -75,6 +75,40 @@ Per-case application failures are stored in `CaseResult.RunError`. Metric evalua
 
 This lets a large suite finish and report all failures instead of stopping at the first bad case.
 
+## Operational failures vs quality failures
+
+Gaugo reports both operational failures and quality failures, but they mean
+different things.
+
+| Signal | Meaning | Typical response |
+| --- | --- | --- |
+| `Runner.Run` returns `error` | The run could not start or reporting failed. | Fix suite setup or reporter code. |
+| `CaseResult.RunError != nil` | Your application could not produce an answer for that case. | Debug the system under test, dependency, timeout, or panic. |
+| `MetricResult.Pass == false` with `MetricErrorInfo` | A metric could not evaluate cleanly. | Debug judge configuration, provider response, rate limit, parse failure, or timeout. |
+| `MetricResult.Pass == false` without `MetricErrorInfo` | The case ran and the metric judged quality below threshold. | Treat it as a product quality failure. |
+
+For programmatic consumers, use `MetricErrorInfo` to separate judge/provider
+problems from low scores:
+
+```go
+for _, c := range result.Cases {
+    if c.RunError != nil {
+        log.Printf("operational case failure case=%s err=%v", c.Name, c.RunError)
+        continue
+    }
+    for _, m := range c.Metrics {
+        if m.Pass {
+            continue
+        }
+        if info, ok := gaugo.MetricErrorInfo(m); ok {
+            log.Printf("operational metric failure case=%s metric=%s kind=%s", c.Name, m.Name, info.Kind)
+            continue
+        }
+        log.Printf("quality failure case=%s metric=%s score=%.3f reason=%s", c.Name, m.Name, m.Score, m.Reason)
+    }
+}
+```
+
 ## Default testing reporter
 
 `Suite.Assert` runs the default testing reporter unless a custom reporter is configured.
@@ -92,6 +126,7 @@ The default reporter:
 - logs metric details when present
 - summarizes metric failures
 - suppresses excessive failure logs after the first 100 failures
+- includes safe operational metadata such as `error_kind`, provider, status code, and request id when available
 
 ## Standalone assertion
 
@@ -141,4 +176,4 @@ func (r TestingJSONReporter) Report(ctx context.Context, result gaugo.RunResult)
 
 `MetricResult.Details` stores metric-specific structured details as JSON bytes. Built-in metrics use it for parsed judge output. Details are capped by `WithMetricDetailsLimit` and may be truncated.
 
-Use details for debugging and dashboards, but do not build critical logic around provider-specific detail shapes. The default `gaugo.Assert` reporter logs safe metadata (`details_bytes`) instead of raw detail payloads.
+Use details for debugging and dashboards, but do not build critical logic around provider-specific detail shapes. The default `gaugo.Assert` reporter logs safe metadata (`details_bytes` and classified error metadata) instead of raw detail payloads.

@@ -10,7 +10,7 @@ const (
 	Anthropic = "anthropic"
 	Gemini    = "gemini"
 	XAI       = "xai"
-	Ollama    = "ollama"
+	Local     = "local"
 )
 
 const (
@@ -21,11 +21,11 @@ const (
 )
 
 const (
-	OpenAIBaseURL      = "https://api.openai.com/v1"
-	AnthropicBaseURL   = "https://api.anthropic.com"
-	GeminiBaseURL      = "https://generativelanguage.googleapis.com"
-	XAIBaseURL         = "https://api.x.ai/v1"
-	OllamaLocalBaseURL = "http://127.0.0.1:11434"
+	OpenAIBaseURL    = "https://api.openai.com/v1"
+	AnthropicBaseURL = "https://api.anthropic.com"
+	GeminiBaseURL    = "https://generativelanguage.googleapis.com"
+	XAIBaseURL       = "https://api.x.ai/v1"
+	LocalBaseURL     = "http://127.0.0.1:11434"
 )
 
 const (
@@ -41,11 +41,14 @@ const (
 	AnthropicDefaultModel = "claude-sonnet-4-5"
 	GeminiDefaultModel    = "gemini-2.5-flash"
 	XAIDefaultModel       = "grok-4.3"
-	OllamaDefaultModel    = "llama3.1"
+	LocalDefaultModel     = "llama3.1"
 )
 
 const (
-	OllamaLocalAPIKey = Ollama
+	LocalAPIKey = Local
+
+	AnthropicDefaultAPIVersion = "2023-06-01"
+	AnthropicDefaultMaxTokens  = 1024
 )
 
 const (

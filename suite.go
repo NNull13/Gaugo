@@ -172,10 +172,11 @@ func (r *Runner) Run(ctx context.Context, run RunFunc, metrics ...Metric) (RunRe
 			mr, mErr := evaluateMetricSafely(caseCtx, metricName, metric, evalIn, r.cfg.judge)
 			if mErr != nil {
 				mr = MetricResult{
-					Name:   metricName,
-					Score:  0,
-					Pass:   false,
-					Reason: mErr.Error(),
+					Name:    metricName,
+					Score:   0,
+					Pass:    false,
+					Reason:  mErr.Error(),
+					Details: errorInfoDetails(mErr),
 				}
 			}
 			mr.Details = limitDetails(mr.Details, r.cfg.detailsMax)
@@ -333,6 +334,10 @@ type panicError struct {
 
 func (e *panicError) Error() string {
 	return fmt.Sprintf("%s panicked: type=%s value=%s", e.Component, e.PanicType, panicValueRedacted)
+}
+
+func (e *panicError) GaugoErrorKind() string {
+	return string(ErrorKindPanic)
 }
 
 func newPanicError(component string, recovered any) error {

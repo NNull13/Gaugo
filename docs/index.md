@@ -43,7 +43,7 @@ This documentation is organized by what you are trying to do.
 | Anthropic | [provider/anthropic.md](provider/anthropic.md) |
 | Gemini | [provider/gemini.md](provider/gemini.md) |
 | xAI | [provider/xai.md](provider/xai.md) |
-| Ollama | [provider/ollama.md](provider/ollama.md) |
+| Local | [provider/local.md](provider/local.md) |
 
 Start with the [provider overview](provider/index.md) if you are not sure
 which adapter to use.
@@ -69,4 +69,3 @@ which adapter to use.
 If something fails, start with [Troubleshooting](troubleshooting.md). It covers
 missing judges, invalid provider config, rate limits, empty outputs, and broken
 test setup.
-

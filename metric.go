@@ -6,14 +6,24 @@ import (
 	"fmt"
 
 	"github.com/nnull13/gaugo/internal/metrics/answerrelevancy"
+	"github.com/nnull13/gaugo/internal/metrics/contextrelevancy"
 	"github.com/nnull13/gaugo/internal/metrics/faithfulness"
 	"github.com/nnull13/gaugo/internal/prompt"
 )
 
 const (
-	metricNameFaithfulness    = "Faithfulness"
-	metricNameAnswerRelevancy = "AnswerRelevancy"
-	judgeEvaluationFailed     = "judge evaluation failed: %w"
+	metricNameFaithfulness     = "Faithfulness"
+	metricNameAnswerRelevancy  = "AnswerRelevancy"
+	metricNameContextRelevancy = "ContextRelevancy"
+
+	errJudgeEvaluationFailed = "judge evaluation failed: %w"
+	errMetricRequiresJudge   = "%s metric requires a configured judge"
+	errMetricParseFailed     = "%s parse failed: %w"
+	errMetricMarshalFailed   = "%s marshal details failed: %w"
+
+	metricLabelFaithfulness     = "faithfulness"
+	metricLabelAnswerRelevancy  = "answer relevancy"
+	metricLabelContextRelevancy = "context relevancy"
 )
 
 // Metric evaluates a completed case and returns a score plus pass/fail result.
@@ -41,38 +51,44 @@ func WithThreshold(v float64) MetricOption {
 	}
 }
 
-func metricDefaults() metricConfig {
-	return metricConfig{threshold: 0.7}
+func applyMetricOptions(opts []MetricOption) (metricConfig, error) {
+	cfg := metricConfig{threshold: 0.7}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+	if cfg.err != nil {
+		return metricConfig{}, cfg.err
+	}
+	return cfg, nil
 }
 
 // Faithfulness returns a metric that scores whether the answer is supported by context.
 func Faithfulness(opts ...MetricOption) Metric {
-	cfg := metricDefaults()
-	for _, opt := range opts {
-		if opt == nil {
-			continue
-		}
-		opt(&cfg)
-	}
-	if cfg.err != nil {
-		return invalidMetric{name: metricNameFaithfulness, err: cfg.err}
+	cfg, err := applyMetricOptions(opts)
+	if err != nil {
+		return invalidMetric{name: metricNameFaithfulness, err: err}
 	}
 	return faithfulnessMetric{cfg: cfg}
 }
 
 // AnswerRelevancy returns a metric that scores whether the answer addresses the input.
 func AnswerRelevancy(opts ...MetricOption) Metric {
-	cfg := metricDefaults()
-	for _, opt := range opts {
-		if opt == nil {
-			continue
-		}
-		opt(&cfg)
-	}
-	if cfg.err != nil {
-		return invalidMetric{name: metricNameAnswerRelevancy, err: cfg.err}
+	cfg, err := applyMetricOptions(opts)
+	if err != nil {
+		return invalidMetric{name: metricNameAnswerRelevancy, err: err}
 	}
 	return answerRelevancyMetric{cfg: cfg}
+}
+
+// ContextRelevancy returns a metric that scores whether context documents are relevant to the input.
+func ContextRelevancy(opts ...MetricOption) Metric {
+	cfg, err := applyMetricOptions(opts)
+	if err != nil {
+		return invalidMetric{name: metricNameContextRelevancy, err: err}
+	}
+	return contextRelevancyMetric{cfg: cfg}
 }
 
 type invalidMetric struct {
@@ -94,18 +110,10 @@ func (m faithfulnessMetric) Name() string { return metricNameFaithfulness }
 
 func (m faithfulnessMetric) Evaluate(ctx context.Context, in EvalInput, j Judge) (MetricResult, error) {
 	if j == nil {
-		return MetricResult{}, fmt.Errorf("faithfulness metric requires a configured judge")
+		return MetricResult{}, fmt.Errorf(errMetricRequiresJudge, metricLabelFaithfulness)
 	}
 
-	var err error
-
-	var (
-		resp    JudgeResponse
-		parsed  faithfulness.Output
-		details []byte
-	)
-
-	resp, err = j.EvaluateJSON(ctx, JudgeRequest{
+	resp, err := j.EvaluateJSON(ctx, JudgeRequest{
 		Metric:       m.Name(),
 		Question:     in.Input.Question,
 		Answer:       in.Output.Answer,
@@ -114,25 +122,72 @@ func (m faithfulnessMetric) Evaluate(ctx context.Context, in EvalInput, j Judge)
 		Schema:       prompt.FaithfulnessSchema(),
 	})
 	if err != nil {
-		return MetricResult{}, fmt.Errorf(judgeEvaluationFailed, err)
+		return MetricResult{}, fmt.Errorf(errJudgeEvaluationFailed, err)
 	}
 
+	var parsed faithfulness.Output
 	parsed, err = faithfulness.Parse(resp.RawJSON)
 	if err != nil {
-		return MetricResult{}, fmt.Errorf("faithfulness parse failed: %w", err)
+		return MetricResult{}, fmt.Errorf(errMetricParseFailed, metricLabelFaithfulness, err)
 	}
 
 	score := faithfulness.Score(parsed.Claims)
-	pass := score >= m.cfg.threshold
+
+	var details []byte
 	details, err = json.Marshal(parsed)
 	if err != nil {
-		return MetricResult{}, fmt.Errorf("faithfulness marshal details failed: %w", err)
+		return MetricResult{}, fmt.Errorf(errMetricMarshalFailed, metricLabelFaithfulness, err)
 	}
 
 	return MetricResult{
 		Name:    m.Name(),
 		Score:   score,
-		Pass:    pass,
+		Pass:    score >= m.cfg.threshold,
+		Reason:  parsed.Reason,
+		Details: details,
+	}, nil
+}
+
+type contextRelevancyMetric struct {
+	cfg metricConfig
+}
+
+func (m contextRelevancyMetric) Name() string { return metricNameContextRelevancy }
+
+func (m contextRelevancyMetric) Evaluate(ctx context.Context, in EvalInput, j Judge) (MetricResult, error) {
+	if j == nil {
+		return MetricResult{}, fmt.Errorf(errMetricRequiresJudge, metricLabelContextRelevancy)
+	}
+
+	resp, err := j.EvaluateJSON(ctx, JudgeRequest{
+		Metric:       m.Name(),
+		Question:     in.Input.Question,
+		ContextDocs:  in.Input.Context,
+		Instructions: prompt.ContextRelevancyInstructions(),
+		Schema:       prompt.ContextRelevancySchema(),
+	})
+	if err != nil {
+		return MetricResult{}, fmt.Errorf(errJudgeEvaluationFailed, err)
+	}
+
+	var parsed contextrelevancy.Output
+	parsed, err = contextrelevancy.Parse(resp.RawJSON)
+	if err != nil {
+		return MetricResult{}, fmt.Errorf(errMetricParseFailed, metricLabelContextRelevancy, err)
+	}
+
+	score := contextrelevancy.Score(parsed.Documents)
+
+	var details []byte
+	details, err = json.Marshal(parsed)
+	if err != nil {
+		return MetricResult{}, fmt.Errorf(errMetricMarshalFailed, metricLabelContextRelevancy, err)
+	}
+
+	return MetricResult{
+		Name:    m.Name(),
+		Score:   score,
+		Pass:    score >= m.cfg.threshold,
 		Reason:  parsed.Reason,
 		Details: details,
 	}, nil
@@ -146,18 +201,10 @@ func (m answerRelevancyMetric) Name() string { return metricNameAnswerRelevancy 
 
 func (m answerRelevancyMetric) Evaluate(ctx context.Context, in EvalInput, j Judge) (MetricResult, error) {
 	if j == nil {
-		return MetricResult{}, fmt.Errorf("answer relevancy metric requires a configured judge")
+		return MetricResult{}, fmt.Errorf(errMetricRequiresJudge, metricLabelAnswerRelevancy)
 	}
 
-	var err error
-
-	var (
-		resp    JudgeResponse
-		parsed  answerrelevancy.Output
-		details []byte
-	)
-
-	resp, err = j.EvaluateJSON(ctx, JudgeRequest{
+	resp, err := j.EvaluateJSON(ctx, JudgeRequest{
 		Metric:       m.Name(),
 		Question:     in.Input.Question,
 		Answer:       in.Output.Answer,
@@ -166,17 +213,19 @@ func (m answerRelevancyMetric) Evaluate(ctx context.Context, in EvalInput, j Jud
 		Schema:       prompt.AnswerRelevancySchema(),
 	})
 	if err != nil {
-		return MetricResult{}, fmt.Errorf(judgeEvaluationFailed, err)
+		return MetricResult{}, fmt.Errorf(errJudgeEvaluationFailed, err)
 	}
 
+	var parsed answerrelevancy.Output
 	parsed, err = answerrelevancy.Parse(resp.RawJSON)
 	if err != nil {
-		return MetricResult{}, fmt.Errorf("answer relevancy parse failed: %w", err)
+		return MetricResult{}, fmt.Errorf(errMetricParseFailed, metricLabelAnswerRelevancy, err)
 	}
 
+	var details []byte
 	details, err = json.Marshal(parsed)
 	if err != nil {
-		return MetricResult{}, fmt.Errorf("answer relevancy marshal details failed: %w", err)
+		return MetricResult{}, fmt.Errorf(errMetricMarshalFailed, metricLabelAnswerRelevancy, err)
 	}
 
 	return MetricResult{

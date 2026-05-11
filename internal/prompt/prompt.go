@@ -130,6 +130,42 @@ func AnswerRelevancySchema() json.RawMessage {
 	}`)
 }
 
+func ContextRelevancyInstructions() string {
+	return "You are a strict context relevancy evaluator.\n" +
+		"Evaluate only whether each reference context document is useful for answering the user input.\n" +
+		"Ignore the actual output entirely; the score must not depend on whether any answer is correct, complete, or present.\n" +
+		"Use only the provided user input and reference context. Do not use outside knowledge.\n" +
+		"For each non-empty context document, return its id, a score as any decimal in [0,1], and a concise reason.\n" +
+		"Score 1 means the document directly and sufficiently helps answer the input; score 0 means it is unrelated or unusable for the input.\n" +
+		"Use the full continuous range for partial relevance, such as incomplete, broad, tangential, ambiguous, or noisy documents.\n" +
+		"If there are no context documents, return documents as an empty array and explain why in reason.\n" +
+		jsonOnlyLine
+}
+
+func ContextRelevancySchema() json.RawMessage {
+	return json.RawMessage(`{
+		"type":"object",
+		"additionalProperties":false,
+		"required":["documents","reason"],
+		"properties":{
+			"documents":{
+				"type":"array",
+				"items":{
+					"type":"object",
+					"additionalProperties":false,
+					"required":["id","score","reason"],
+					"properties":{
+						"id":{"type":"string"},
+						"score":{"type":"number","minimum":0,"maximum":1},
+						"reason":{"type":"string"}
+					}
+				}
+			},
+			"reason":{"type":"string"}
+		}
+	}`)
+}
+
 type cappedWriter struct {
 	buf       bytes.Buffer
 	limit     int

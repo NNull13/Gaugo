@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 )
 
 type Config struct {
+	Provider        string
 	APIKey          string
 	Model           string
 	BaseURL         string
@@ -45,34 +45,29 @@ type schemaField struct {
 }
 
 func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.EvalResult, error) {
-	var (
-		err    error
-		schema any
-		body   []byte
-		resp   wire.HTTPResponse
-	)
-
+	providerName := wire.ProviderLabel(cfg.Provider, provider.OpenAI)
 	apiKey := strings.TrimSpace(cfg.APIKey)
 	if apiKey == "" {
-		return wire.EvalResult{}, provider.ProviderAPIKeyRequiredError(provider.OpenAI)
+		return wire.EvalResult{}, provider.ProviderAPIKeyRequiredError(providerName)
 	}
 	model := strings.TrimSpace(cfg.Model)
 	if model == "" {
 		model = provider.OpenAIDefaultModel
 	}
-	endpoint := endpointURL(cfg.EndpointURL, cfg.BaseURL, provider.OpenAIBaseURL, provider.OpenAIChatCompletionsPath)
+	endpoint := wire.EndpointURL(cfg.EndpointURL, cfg.BaseURL, provider.OpenAIBaseURL, provider.OpenAIChatCompletionsPath)
 
-	schema, err = wire.DecodeSchema(req.Schema)
+	schema, err := wire.DecodeSchema(req.Schema)
 	if err != nil {
 		return wire.EvalResult{}, err
 	}
 
+	var body []byte
 	body, err = json.Marshal(requestBody{
 		Model:       model,
 		Temperature: 0,
 		Messages: []message{
-			{Role: "system", Content: req.Instructions},
-			{Role: "user", Content: req.UserPrompt},
+			{Role: wire.RoleSystem, Content: req.Instructions},
+			{Role: wire.RoleUser, Content: req.UserPrompt},
 		},
 		ResponseFormat: responseFormat{
 			Type: wire.SchemaTypeJSONSchema,
@@ -84,18 +79,19 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		},
 	})
 	if err != nil {
-		return wire.EvalResult{}, fmt.Errorf("marshal openai request: %w", err)
+		return wire.EvalResult{}, wire.MarshalRequestError(providerName, err)
 	}
 
+	var resp wire.HTTPResponse
 	resp, err = wire.PostJSONWithOptions(ctx, wire.NewHTTPClient(cfg.HTTPClient), endpoint, map[string]string{
 		wire.HeaderAuthorization: wire.AuthBearerPrefix + apiKey,
 		wire.HeaderContentType:   wire.ContentTypeJSON,
 	}, body, wire.HTTPOptions{Retry: cfg.Retry, MaxBodyBytes: cfg.MaxResponseBody})
 	if err != nil {
-		return wire.EvalResult{}, fmt.Errorf("openai judge request failed: %w", err)
+		return wire.EvalResult{}, wire.JudgeRequestError(providerName, err)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
-		return wire.EvalResult{}, wire.StatusError(provider.OpenAI, resp)
+		return wire.EvalResult{}, wire.StatusError(providerName, resp)
 	}
 
 	var parsed struct {
@@ -110,25 +106,25 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 	}
 	err = json.Unmarshal(resp.Body, &parsed)
 	if err != nil {
-		return wire.EvalResult{}, fmt.Errorf("decode openai response: %w", err)
+		return wire.EvalResult{}, wire.DecodeResponseWrapError(providerName, err)
 	}
 	if len(parsed.Choices) == 0 {
-		return wire.EvalResult{}, fmt.Errorf("decode openai response: no choices returned")
+		return wire.EvalResult{}, wire.DecodeResponseError(providerName, "no choices returned")
 	}
 	if strings.EqualFold(parsed.Choices[0].FinishReason, "length") {
-		return wire.EvalResult{}, fmt.Errorf("decode openai response: output truncated by token limit")
+		return wire.EvalResult{}, wire.DecodeResponseError(providerName, "output truncated by token limit")
 	}
 	if strings.TrimSpace(parsed.Choices[0].Message.Refusal) != "" {
-		return wire.EvalResult{}, fmt.Errorf("decode openai response: model refusal")
+		return wire.EvalResult{}, wire.DecodeResponseError(providerName, wire.ErrRefusal)
 	}
 
 	content := wire.StripCodeFence(parsed.Choices[0].Message.Content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, fmt.Errorf("decode openai response: empty message content")
+		return wire.EvalResult{}, wire.DecodeResponseError(providerName, "empty message content")
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, fmt.Errorf("decode openai response: invalid json payload")
+		return wire.EvalResult{}, wire.DecodeResponseError(providerName, wire.ErrInvalidJSONPayload)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)
@@ -142,15 +138,4 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		Latency:   resp.Latency,
 		RequestID: wire.RequestID(resp.Header),
 	}, nil
-}
-
-func endpointURL(endpointURL, baseURL, defaultBaseURL, path string) string {
-	if endpoint := strings.TrimSpace(endpointURL); endpoint != "" {
-		return endpoint
-	}
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if base == "" {
-		base = defaultBaseURL
-	}
-	return base + path
 }
