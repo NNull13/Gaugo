@@ -37,15 +37,17 @@ func (staticJudge) EvaluateJSON(ctx context.Context, req gaugo.JudgeRequest) (ga
     switch req.Metric {
     case "Faithfulness":
         return gaugo.JudgeResponse{
-            RawJSON:  []byte(`{"claims":[{"text":"answer is supported","supported":true}],"reason":"supported by fixture"}`),
-            Provider: "static",
-            Model:    "fixture",
+            RawJSON:   []byte(`{"claims":[{"text":"answer is supported","supported":true}],"reason":"supported by fixture"}`),
+            Provider:  "static",
+            Model:     "fixture",
+            RequestID: "fixture-faithfulness",
         }, nil
     case "AnswerRelevancy":
         return gaugo.JudgeResponse{
-            RawJSON:  []byte(`{"score":1,"reason":"answers the question","issues":[]}`),
-            Provider: "static",
-            Model:    "fixture",
+            RawJSON:   []byte(`{"score":1,"reason":"answers the question","issues":[]}`),
+            Provider:  "static",
+            Model:     "fixture",
+            RequestID: "fixture-answer-relevancy",
         }, nil
     default:
         return gaugo.JudgeResponse{}, fmt.Errorf("unsupported metric %q", req.Metric)
@@ -114,10 +116,11 @@ func (j GatewayJudge) EvaluateJSON(ctx context.Context, req gaugo.JudgeRequest) 
     }
 
     return gaugo.JudgeResponse{
-        RawJSON:  raw,
-        Provider: "gateway",
-        Model:    "internal",
-        Latency:  time.Since(start),
+        RawJSON:   raw,
+        Provider:  "gateway",
+        Model:     "internal",
+        RequestID: resp.Header.Get("x-request-id"),
+        Latency:   time.Since(start),
     }, nil
 }
 ```
@@ -126,6 +129,7 @@ func (j GatewayJudge) EvaluateJSON(ctx context.Context, req gaugo.JudgeRequest) 
 
 - Honor `ctx`; Gaugo uses it for case timeouts and cancellation.
 - Return raw JSON only in `JudgeResponse.RawJSON`.
+- Populate `Provider`, `Model`, `RequestID`, and `Latency` when known; Gaugo copies them into `MetricResult`.
 - Keep provider errors concise and safe for test logs.
 - Do not include secrets in errors.
 - Use `req.Schema` if your gateway supports structured output.

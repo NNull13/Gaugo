@@ -101,6 +101,26 @@ Use `0` to disable metric details entirely.
 
 The value must be non-negative.
 
+## Metric options
+
+Built-in metrics accept metric-specific options in their constructors.
+
+```go
+gaugo.Faithfulness(gaugo.WithThreshold(0.9))
+gaugo.SchemaCompliance(gaugo.WithSchema(schema))
+gaugo.ExpectedJSON(gaugo.WithExpectedFields(map[string]any{"status": "ok"}))
+gaugo.Latency(gaugo.WithMaxLatency(250 * time.Millisecond))
+gaugo.AnswerLength(gaugo.WithMinLength(20), gaugo.WithMaxLength(500))
+```
+
+Options:
+
+- `WithThreshold(v float64)` sets pass/fail threshold in `[0,1]`.
+- `WithSchema(schema json.RawMessage)` configures `SchemaCompliance`.
+- `WithExpectedFields(fields map[string]any)` configures `ExpectedJSON`; dotted paths such as `meta.count` and array indexes such as `items.0.id` are supported.
+- `WithMaxLatency(d time.Duration)` configures `Latency`.
+- `WithMinLength(n int)` and `WithMaxLength(n int)` configure `AnswerLength`.
+
 ## RetryConfig
 
 Bundled providers accept `gaugo.RetryConfig`.

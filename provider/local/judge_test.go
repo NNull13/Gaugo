@@ -151,6 +151,71 @@ func TestModeAnthropic(t *testing.T) {
 	}
 }
 
+func TestDefaultModelAllModes(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		cfg      Config
+		response string
+	}{
+		{
+			name:     "native",
+			cfg:      Config{Mode: ModeNative},
+			response: `{"message":{"content":"{\"mode\":\"native\"}"}}`,
+		},
+		{
+			name:     "openai chat",
+			cfg:      Config{Mode: ModeOpenAI, OpenAICompatEndpoint: OpenAIEndpointChat},
+			response: `{"choices":[{"message":{"content":"{\"mode\":\"openai_chat\"}"}}]}`,
+		},
+		{
+			name:     "openai responses",
+			cfg:      Config{Mode: ModeOpenAI, OpenAICompatEndpoint: OpenAIEndpointResponses},
+			response: `{"output_text":"{\"mode\":\"openai_responses\"}"}`,
+		},
+		{
+			name:     "anthropic",
+			cfg:      Config{Mode: ModeAnthropic},
+			response: `{"content":[{"type":"text","text":"{\"mode\":\"anthropic\"}"}]}`,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Model string `json:"model"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Fatalf("decode request body: %v", err)
+				}
+				if body.Model != "llama3.1" {
+					t.Fatalf("model got=%q want=llama3.1", body.Model)
+				}
+				_, _ = w.Write([]byte(tt.response))
+			}))
+			defer srv.Close()
+
+			tt.cfg.EndpointURL = srv.URL
+			j, err := New(tt.cfg)
+			if err != nil {
+				t.Fatalf("New error: %v", err)
+			}
+			res, err := j.EvaluateJSON(context.Background(), sampleJudgeRequest())
+			if err != nil {
+				t.Fatalf("EvaluateJSON error: %v", err)
+			}
+			if res.Model != "llama3.1" {
+				t.Fatalf("response model got=%q want=llama3.1", res.Model)
+			}
+		})
+	}
+}
+
 func TestInvalidMode(t *testing.T) {
 	t.Parallel()
 

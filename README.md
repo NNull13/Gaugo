@@ -16,9 +16,9 @@
 
 Gaugo lets Go teams evaluate RAG systems, agents, chatbots, and other AI-backed
 services with deterministic test cases, optional LLM judges, concurrent
-execution, and structured results that fit naturally into CI. For RAG systems,
-Gaugo is organized around the familiar quality triad: `ContextRelevancy`,
-`Faithfulness`, and `AnswerRelevancy`.
+execution, and structured results that fit naturally into CI. Gaugo includes
+24 built-in metrics across RAG, safety, generation quality, structured output,
+instruction following, domain-specific checks, and deterministic contracts.
 
 ```sh
 go get github.com/nnull13/gaugo
@@ -30,8 +30,8 @@ go get github.com/nnull13/gaugo
 | --- | --- |
 | Native Go tests | Write AI evaluations as normal `testing` tests. |
 | Deterministic reporting | Run cases concurrently while preserving registration order. |
-| No-LLM checks | Catch required behavior with cheap `ExpectedContains` assertions. |
-| LLM-judged RAG metrics | Use structured-output judges for context relevancy, faithfulness, and answer relevancy. |
+| No-LLM checks | Catch required behavior with JSON, regex, latency, length, and `ExpectedContains` assertions. |
+| LLM-judged metrics | Use structured-output judges for RAG, safety, answer quality, citations, summaries, and custom criteria. |
 | Programmatic runs | Use `Runner` to feed dashboards, CLIs, and internal pipelines. |
 | Provider adapters | Start with OpenAI, Anthropic, Gemini, xAI, or a local model service. |
 | Extension points | Bring your own judge, metric, or reporter. |

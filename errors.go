@@ -38,33 +38,18 @@ type ErrorInfo struct {
 	BodyBytes  int       `json:"body_bytes,omitempty"`
 }
 
-type gaugoKindError interface {
-	GaugoErrorKind() string
-}
+// The following interfaces are matched structurally by ClassifyError: any
+// error in the chain that implements one or more of them contributes its
+// metadata to the returned ErrorInfo. Provider and metric packages implement
+// these on their own error types — no shared base struct is required.
 
-type gaugoProviderError interface {
-	GaugoProvider() string
-}
-
-type gaugoWireError interface {
-	GaugoWire() string
-}
-
-type gaugoModelError interface {
-	GaugoModel() string
-}
-
-type gaugoStatusCodeError interface {
-	GaugoStatusCode() int
-}
-
-type gaugoRequestIDError interface {
-	GaugoRequestID() string
-}
-
-type gaugoBodyBytesError interface {
-	GaugoBodyBytes() int
-}
+type gaugoKindError interface{ GaugoErrorKind() string }
+type gaugoProviderError interface{ GaugoProvider() string }
+type gaugoWireError interface{ GaugoWire() string }
+type gaugoModelError interface{ GaugoModel() string }
+type gaugoStatusCodeError interface{ GaugoStatusCode() int }
+type gaugoRequestIDError interface{ GaugoRequestID() string }
+type gaugoBodyBytesError interface{ GaugoBodyBytes() int }
 
 // ClassifyError returns redacted operational metadata for err.
 func ClassifyError(err error) ErrorInfo {
@@ -93,7 +78,7 @@ func ClassifyError(err error) ErrorInfo {
 			info.Kind = ErrorKindUnknown
 		}
 	} else {
-		// Prefer structured status code from the error chain over string matching.
+		// Prefer a structured status code from the error chain over string matching.
 		var statusErr gaugoStatusCodeError
 		if errors.As(err, &statusErr) {
 			info.Kind = kindFromStatusCode(statusErr.GaugoStatusCode())
@@ -174,10 +159,9 @@ func kindFromStatusCode(code int) ErrorKind {
 }
 
 // inferErrorKind is a best-effort fallback for errors that do not implement
-// the gaugoKindError or gaugoStatusCodeError interfaces. It matches against
-// known error message substrings produced by Gaugo's own packages. This is
-// inherently fragile — prefer implementing GaugoErrorKind() on error types
-// when possible.
+// gaugoKindError or gaugoStatusCodeError. It matches against known error
+// message substrings produced by Gaugo's own packages. This is inherently
+// fragile — prefer implementing GaugoErrorKind() on error types when possible.
 func inferErrorKind(err error) ErrorKind {
 	msg := strings.ToLower(err.Error())
 	switch {

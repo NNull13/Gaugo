@@ -21,16 +21,32 @@ This documentation is organized by what you are trying to do.
 | Guide | Use it when |
 | --- | --- |
 | [Testing with Suite](guides/testing-with-suite.md) | You want evaluations to fail normal Go tests. |
-| [Programmatic Runner](guides/programmatic-runner.md) | You need structured results for a CLI, API, dashboard, or pipeline. |
+| [Programmatic Runner](guides/programmatic-runner.md) | You need structured results for a CLI, service, dashboard, or pipeline. |
 | [CI integration](guides/ci-integration.md) | You want stable GitHub Actions or CI jobs. |
 | [Production usage](guides/production.md) | You need cost, rate-limit, timeout, and reliability guidance. |
+
+## Metrics
+
+Detailed documentation for every built-in metric, organized by category.
+Start with the [metrics overview](metrics/index.md) for the full catalog.
+
+| Category | Page |
+| --- | --- |
+| Overview and catalog | [metrics/index.md](metrics/index.md) |
+| RAG evaluation | [metrics/rag.md](metrics/rag.md) |
+| Answer quality | [metrics/answer.md](metrics/answer.md) |
+| Safety | [metrics/safety.md](metrics/safety.md) |
+| Generation quality | [metrics/generation-quality.md](metrics/generation-quality.md) |
+| Structured output | [metrics/structured-output.md](metrics/structured-output.md) |
+| Specialized | [metrics/specialized.md](metrics/specialized.md) |
+| Deterministic contracts | [metrics/deterministic.md](metrics/deterministic.md) |
 
 ## Reference
 
 | Reference | Covers |
 | --- | --- |
 | [Cases and inputs](reference/cases-and-inputs.md) | `Case`, `Question`, `ContextDocs`, `ExpectedContains`, `Input`, and `Output`. |
-| [Metrics](reference/metrics.md) | `ExpectedContains`, `Faithfulness`, `AnswerRelevancy`, scoring, and thresholds. |
+| [Metrics quick reference](reference/metrics.md) | Metric catalog, threshold defaults, and option summary. |
 | [Configuration](reference/configuration.md) | Suite options, metric options, provider options, retries, and URL behavior. |
 | [Results and reporting](reference/results-and-reporting.md) | `RunResult`, `CaseResult`, `MetricResult`, `Assert`, and `Reporter`. |
 | [Errors and retries](reference/errors-and-retries.md) | Validation errors, run errors, judge errors, HTTP failures, and retry behavior. |

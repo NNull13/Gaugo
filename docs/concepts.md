@@ -175,7 +175,7 @@ type Judge interface {
 }
 ```
 
-A judge receives metric instructions and a JSON schema. It must return strict JSON in `JudgeResponse.RawJSON`. Gaugo parses that JSON and turns it into metric scores.
+A judge receives metric instructions and a JSON schema. It must return strict JSON in `JudgeResponse.RawJSON`. Gaugo parses that JSON and turns it into metric scores. Judge metadata such as provider, model, request id, and latency is copied into the resulting `MetricResult`.
 
 Use bundled providers for common model APIs, or implement the interface for internal model gateways and test doubles.
 
@@ -201,7 +201,7 @@ type RunResult struct {
 }
 ```
 
-Each `CaseResult` contains the case name, metric results, run error, and elapsed time. Each `MetricResult` contains the metric name, score, pass/fail state, reason, and optional details.
+Each `CaseResult` contains the case name, metric results, run error, and elapsed time. Each `MetricResult` contains the metric name, canonical score, pass/fail state, reason, optional metric-specific details, and judge metadata when the metric used an LLM judge.
 
 ```go
 for _, c := range result.Cases {

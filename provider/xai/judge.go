@@ -34,7 +34,8 @@ type Judge struct {
 
 // New returns a configured xAI judge.
 func New(cfg Config) (*Judge, error) {
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		return nil, err
 	}
 	return &Judge{cfg: cfg}, nil
@@ -64,10 +65,11 @@ func (j *Judge) evalResponses(ctx context.Context, req wire.EvalRequest) (gaugo.
 		return gaugo.JudgeResponse{}, err
 	}
 	return gaugo.JudgeResponse{
-		RawJSON:  res.RawJSON,
-		Provider: provider.XAI,
-		Model:    res.Model,
-		Latency:  res.Latency,
+		RawJSON:   res.RawJSON,
+		Provider:  provider.XAI,
+		Model:     res.Model,
+		RequestID: res.RequestID,
+		Latency:   res.Latency,
 	}, nil
 }
 
@@ -86,10 +88,11 @@ func (j *Judge) evalChat(ctx context.Context, req wire.EvalRequest) (gaugo.Judge
 		return gaugo.JudgeResponse{}, err
 	}
 	return gaugo.JudgeResponse{
-		RawJSON:  res.RawJSON,
-		Provider: provider.XAI,
-		Model:    res.Model,
-		Latency:  res.Latency,
+		RawJSON:   res.RawJSON,
+		Provider:  provider.XAI,
+		Model:     res.Model,
+		RequestID: res.RequestID,
+		Latency:   res.Latency,
 	}, nil
 }
 
@@ -114,13 +117,16 @@ func (cfg Config) Validate() error {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return provider.ConfigError(provider.XAI, provider.ConfigAPIKeyRequired)
 	}
-	if err := validate.CloudURL(cfg.BaseURL, cfg.AllowUnsafeURL, provider.XAIHost); err != nil {
+	err := validate.CloudURL(cfg.BaseURL, cfg.AllowUnsafeURL, provider.XAIHost)
+	if err != nil {
 		return provider.ConfigWrapError(provider.XAI, err)
 	}
-	if err := validate.CloudURL(cfg.EndpointURL, cfg.AllowUnsafeURL, provider.XAIHost); err != nil {
+	err = validate.CloudURL(cfg.EndpointURL, cfg.AllowUnsafeURL, provider.XAIHost)
+	if err != nil {
 		return provider.ConfigFieldWrapError(provider.XAI, provider.FieldEndpointURL, err)
 	}
-	if err := cfg.Retry.Validate(); err != nil {
+	err = cfg.Retry.Validate()
+	if err != nil {
 		return provider.ConfigWrapError(provider.XAI, err)
 	}
 	if cfg.MaxResponseBody < 0 {

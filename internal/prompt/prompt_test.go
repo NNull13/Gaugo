@@ -22,6 +22,33 @@ func TestBuildUserPromptNoDocs(t *testing.T) {
 	if !strings.Contains(got, "Reference Context:\n(none)") {
 		t.Fatalf("missing no-context marker: %q", got)
 	}
+	if strings.Contains(got, "EXPECTED_ANSWER") {
+		t.Fatalf("default prompt should omit expected answer frame: %q", got)
+	}
+}
+
+func TestBuildUserPromptWithExpectedAnswer(t *testing.T) {
+	t.Parallel()
+
+	got := BuildUserPromptWithExpected("Q", "A", "  ground truth  ", nil)
+	if !strings.Contains(got, "DATA-BEGIN EXPECTED_ANSWER\n") {
+		t.Fatalf("missing expected answer data frame: %q", got)
+	}
+	if !strings.Contains(got, "Expected Answer:\nground truth") {
+		t.Fatalf("missing trimmed expected answer in prompt: %q", got)
+	}
+}
+
+func TestBuildUserPromptWithExpectedInstructions(t *testing.T) {
+	t.Parallel()
+
+	got := BuildUserPromptWithExpectedAndInstructions("Q", "A", "", "  answer in JSON  ", nil)
+	if !strings.Contains(got, "DATA-BEGIN EXPECTED_INSTRUCTIONS\n") {
+		t.Fatalf("missing expected instructions data frame: %q", got)
+	}
+	if !strings.Contains(got, "Expected Instructions:\nanswer in JSON") {
+		t.Fatalf("missing trimmed expected instructions in prompt: %q", got)
+	}
 }
 
 func TestBuildUserPromptWithDocs(t *testing.T) {
@@ -129,13 +156,90 @@ func TestMetricInstructionsContainStrictOutputRules(t *testing.T) {
 	}
 }
 
+func TestExpandedMetricInstructionsContainStrictOutputRules(t *testing.T) {
+	t.Parallel()
+
+	instructions := map[string]string{
+		"context precision":     ContextPrecisionInstructions(),
+		"context recall":        ContextRecallInstructions(),
+		"answer correctness":    AnswerCorrectnessInstructions(),
+		"hallucination":         HallucinationInstructions(),
+		"toxicity":              ToxicityInstructions(),
+		"bias":                  BiasInstructions(),
+		"coherence":             CoherenceInstructions(),
+		"conciseness":           ConcisenessInstructions(),
+		"completeness":          CompletenessInstructions(),
+		"instruction adherence": InstructionAdherenceInstructions(),
+		"citation accuracy":     CitationAccuracyInstructions(),
+		"summarization quality": SummarizationQualityInstructions(),
+	}
+
+	for name, text := range instructions {
+		if strings.TrimSpace(text) == "" {
+			t.Fatalf("%s instructions are empty", name)
+		}
+		if !strings.Contains(strings.ToLower(text), "return valid json only") {
+			t.Fatalf("%s instructions must enforce raw json output: %q", name, text)
+		}
+	}
+
+	gEval := GEvalInstructions("prefer useful answers")
+	if !strings.Contains(gEval, "prefer useful answers") {
+		t.Fatalf("GEval instructions should include criteria: %q", gEval)
+	}
+	if !strings.Contains(strings.ToLower(GEvalInstructions("")), "user-defined criteria") {
+		t.Fatalf("GEval fallback instructions should mention criteria")
+	}
+}
+
 func TestSchemasAreValidJSON(t *testing.T) {
 	t.Parallel()
 
-	for _, raw := range []json.RawMessage{FaithfulnessSchema(), AnswerRelevancySchema(), ContextRelevancySchema()} {
+	for _, raw := range []json.RawMessage{
+		FaithfulnessSchema(),
+		AnswerRelevancySchema(),
+		ContextRelevancySchema(),
+		ContextPrecisionSchema(),
+		ContextRecallSchema(),
+		AnswerCorrectnessSchema(),
+		HallucinationSchema(),
+		ToxicitySchema(),
+		BiasSchema(),
+		CoherenceSchema(),
+		ConcisenessSchema(),
+		CompletenessSchema(),
+		InstructionAdherenceSchema(),
+		CitationAccuracySchema(),
+		SummarizationQualitySchema(),
+	} {
 		var decoded any
 		if err := json.Unmarshal(raw, &decoded); err != nil {
 			t.Fatalf("schema is not valid json: %v", err)
+		}
+	}
+}
+
+func TestDerivedScoreSchemasDoNotExposeScore(t *testing.T) {
+	t.Parallel()
+
+	for name, raw := range map[string]json.RawMessage{
+		"instruction adherence": InstructionAdherenceSchema(),
+		"summarization quality": SummarizationQualitySchema(),
+	} {
+		var decoded struct {
+			Required   []string                   `json:"required"`
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatalf("%s schema decode error: %v", name, err)
+		}
+		if _, ok := decoded.Properties["score"]; ok {
+			t.Fatalf("%s schema should not expose score", name)
+		}
+		for _, required := range decoded.Required {
+			if required == "score" {
+				t.Fatalf("%s schema should not require score", name)
+			}
 		}
 	}
 }

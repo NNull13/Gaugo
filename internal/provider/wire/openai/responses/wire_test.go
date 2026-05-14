@@ -3,6 +3,7 @@ package responses
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,12 @@ import (
 
 	"github.com/nnull13/gaugo/internal/provider/wire"
 )
+
+type wireErrorMetadata interface {
+	GaugoErrorKind() string
+	GaugoWire() string
+	GaugoRequestID() string
+}
 
 func TestEvaluateJSONWithOutputText(t *testing.T) {
 	t.Parallel()
@@ -177,6 +184,7 @@ func TestEvaluateJSONIncompleteOutput(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(wire.HeaderXRequestID, "req_incomplete")
 		_, _ = w.Write([]byte(`{"model":"m1","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}`))
 	}))
 	defer srv.Close()
@@ -192,6 +200,43 @@ func TestEvaluateJSONIncompleteOutput(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "incomplete") {
 		t.Fatalf("expected incomplete error, got %v", err)
+	}
+	var meta wireErrorMetadata
+	if !errors.As(err, &meta) {
+		t.Fatalf("expected wire metadata error, got %T", err)
+	}
+	if meta.GaugoErrorKind() != "provider_truncated" || meta.GaugoWire() != wireName || meta.GaugoRequestID() != "req_incomplete" {
+		t.Fatalf("unexpected metadata kind=%q wire=%q request_id=%q", meta.GaugoErrorKind(), meta.GaugoWire(), meta.GaugoRequestID())
+	}
+}
+
+func TestEvaluateJSONRefusalBlock(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(wire.HeaderXRequestID, "req_refusal")
+		_, _ = w.Write([]byte(`{"model":"m1","output":[{"type":"message","content":[{"type":"refusal","text":"no"}]}]}`))
+	}))
+	defer srv.Close()
+
+	_, err := EvaluateJSON(context.Background(), Config{
+		APIKey:      "test-key",
+		EndpointURL: srv.URL,
+	}, wire.EvalRequest{
+		Metric:       "AnswerRelevancy",
+		Instructions: "sys",
+		UserPrompt:   "prompt",
+		Schema:       json.RawMessage(`{"type":"object"}`),
+	})
+	if err == nil || !strings.Contains(err.Error(), "refusal") {
+		t.Fatalf("expected refusal error, got %v", err)
+	}
+	var meta wireErrorMetadata
+	if !errors.As(err, &meta) {
+		t.Fatalf("expected wire metadata error, got %T", err)
+	}
+	if meta.GaugoErrorKind() != "provider_refusal" || meta.GaugoWire() != wireName || meta.GaugoRequestID() != "req_refusal" {
+		t.Fatalf("unexpected metadata kind=%q wire=%q request_id=%q", meta.GaugoErrorKind(), meta.GaugoWire(), meta.GaugoRequestID())
 	}
 }
 

@@ -19,15 +19,6 @@ type CaseResult struct {
 	Elapsed  time.Duration
 }
 
-// MetricResult represents a score and pass/fail outcome for one metric.
-type MetricResult struct {
-	Name    string
-	Score   float64
-	Pass    bool
-	Reason  string
-	Details []byte
-}
-
 // Failed reports whether any case has a run error or a failing metric.
 func (r RunResult) Failed() bool {
 	for _, c := range r.Cases {
@@ -38,23 +29,12 @@ func (r RunResult) Failed() bool {
 	return false
 }
 
-// PassRate returns the fraction of metrics that passed across all cases, in [0,1].
-// Cases with run errors count as zero passing metrics.
-// Returns 0 when no metrics are present.
+// PassRate returns passed checks divided by explicit checks plus run errors.
+// Run errors count as failed executions in the denominator.
 func (r RunResult) PassRate() float64 {
-	var total, passed int
-	for _, c := range r.Cases {
-		if c.RunError != nil {
-			total++
-			continue
-		}
-		for _, m := range c.Metrics {
-			total++
-			if m.Pass {
-				passed++
-			}
-		}
-	}
+	checks, failedChecks, runErrors := r.counts()
+	total := checks + runErrors
+	passed := checks - failedChecks
 	if total == 0 {
 		return 0
 	}
@@ -63,21 +43,36 @@ func (r RunResult) PassRate() float64 {
 
 // Summary returns a human-readable one-line summary suitable for logs and CI output.
 func (r RunResult) Summary() string {
-	var totalMetrics, failedMetrics, failedCases int
+	checks, failedChecks, runErrors := r.counts()
+	failedCases := r.failedCases()
+	return fmt.Sprintf("cases=%d failed_cases=%d checks=%d failed_checks=%d run_errors=%d pass_rate=%.1f%%",
+		len(r.Cases), failedCases, checks, failedChecks, runErrors, r.PassRate()*100)
+}
+
+func (r RunResult) counts() (checks int, failedChecks int, runErrors int) {
 	for _, c := range r.Cases {
 		if c.RunError != nil {
-			failedCases++
+			runErrors++
 			continue
 		}
 		for _, m := range c.Metrics {
-			totalMetrics++
+			checks++
 			if !m.Pass {
-				failedMetrics++
+				failedChecks++
 			}
 		}
 	}
-	return fmt.Sprintf("cases=%d failed_cases=%d metrics=%d failed_metrics=%d pass_rate=%.1f%%",
-		len(r.Cases), failedCases, totalMetrics, failedMetrics, r.PassRate()*100)
+	return checks, failedChecks, runErrors
+}
+
+func (r RunResult) failedCases() int {
+	var failed int
+	for _, c := range r.Cases {
+		if c.Failed() {
+			failed++
+		}
+	}
+	return failed
 }
 
 // Failed reports whether this case has a run error or any failing metric.

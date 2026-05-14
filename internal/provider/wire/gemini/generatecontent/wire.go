@@ -22,6 +22,19 @@ type Config struct {
 	MaxResponseBody int64
 }
 
+const (
+	wireName                      = "generate_content"
+	finishReasonMaxTokens         = "MAX_TOKENS"
+	finishReasonSafety            = "SAFETY"
+	finishReasonBlocklist         = "BLOCKLIST"
+	finishReasonProhibitedContent = "PROHIBITED_CONTENT"
+	errNoTextCandidatesReturned   = "no text candidates returned"
+	errOutputTruncatedMaxTokens   = "output truncated by max tokens"
+	blockedOutputFormat           = "output blocked with finish reason %q"
+	generateContentPathPrefix     = "/v1beta/models/"
+	generateContentPathSuffix     = ":generateContent"
+)
+
 type requestBody struct {
 	Contents         []content        `json:"contents"`
 	GenerationConfig generationConfig `json:"generationConfig"`
@@ -77,7 +90,7 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		},
 	})
 	if err != nil {
-		return wire.EvalResult{}, wire.MarshalRequestError(provider.Gemini, err)
+		return wire.EvalResult{}, wire.MarshalRequestErrorForWire(provider.Gemini, wireName, err)
 	}
 
 	var resp wire.HTTPResponse
@@ -86,10 +99,10 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		wire.HeaderContentType:  wire.ContentTypeJSON,
 	}, body, wire.HTTPOptions{Retry: cfg.Retry, MaxBodyBytes: cfg.MaxResponseBody})
 	if err != nil {
-		return wire.EvalResult{}, wire.JudgeRequestError(provider.Gemini, err)
+		return wire.EvalResult{}, wire.JudgeRequestErrorForWire(provider.Gemini, wireName, err)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
-		return wire.EvalResult{}, wire.StatusError(provider.Gemini, resp)
+		return wire.EvalResult{}, wire.StatusErrorForWire(provider.Gemini, wireName, resp)
 	}
 
 	var parsed struct {
@@ -104,19 +117,20 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		ModelVersion string `json:"modelVersion"`
 	}
 	err = json.Unmarshal(resp.Body, &parsed)
+	requestID := wire.RequestID(resp.Header)
 	if err != nil {
-		return wire.EvalResult{}, wire.DecodeResponseWrapError(provider.Gemini, err)
+		return wire.EvalResult{}, wire.DecodeResponseWrapErrorForWire(provider.Gemini, wireName, err, requestID)
 	}
 	if len(parsed.Candidates) == 0 || len(parsed.Candidates[0].Content.Parts) == 0 {
-		return wire.EvalResult{}, wire.DecodeResponseError(provider.Gemini, "no text candidates returned")
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Gemini, wireName, errNoTextCandidatesReturned, requestID)
 	}
-	if strings.EqualFold(parsed.Candidates[0].FinishReason, "MAX_TOKENS") {
-		return wire.EvalResult{}, wire.DecodeResponseError(provider.Gemini, "output truncated by max tokens")
+	if strings.EqualFold(parsed.Candidates[0].FinishReason, finishReasonMaxTokens) {
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Gemini, wireName, errOutputTruncatedMaxTokens, requestID)
 	}
-	if strings.EqualFold(parsed.Candidates[0].FinishReason, "SAFETY") ||
-		strings.EqualFold(parsed.Candidates[0].FinishReason, "BLOCKLIST") ||
-		strings.EqualFold(parsed.Candidates[0].FinishReason, "PROHIBITED_CONTENT") {
-		return wire.EvalResult{}, wire.DecodeResponseError(provider.Gemini, fmt.Sprintf("output blocked with finish reason %q", parsed.Candidates[0].FinishReason))
+	if strings.EqualFold(parsed.Candidates[0].FinishReason, finishReasonSafety) ||
+		strings.EqualFold(parsed.Candidates[0].FinishReason, finishReasonBlocklist) ||
+		strings.EqualFold(parsed.Candidates[0].FinishReason, finishReasonProhibitedContent) {
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Gemini, wireName, fmt.Sprintf(blockedOutputFormat, parsed.Candidates[0].FinishReason), requestID)
 	}
 
 	var sb strings.Builder
@@ -131,11 +145,11 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 	}
 	content := wire.StripCodeFence(sb.String())
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, wire.DecodeResponseError(provider.Gemini, "empty text content")
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Gemini, wireName, wire.ErrEmptyTextContent, requestID)
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, wire.DecodeResponseError(provider.Gemini, wire.ErrInvalidJSONPayload)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Gemini, wireName, wire.ErrInvalidJSONPayload, requestID)
 	}
 
 	outModel := strings.TrimSpace(parsed.ModelVersion)
@@ -147,7 +161,7 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		RawJSON:   rawJSON,
 		Model:     outModel,
 		Latency:   resp.Latency,
-		RequestID: wire.RequestID(resp.Header),
+		RequestID: requestID,
 	}, nil
 }
 
@@ -158,5 +172,5 @@ func buildEndpoint(endpointURL, baseURL, model string) string {
 	if baseURL == "" {
 		baseURL = provider.GeminiBaseURL
 	}
-	return strings.TrimRight(baseURL, "/") + "/v1beta/models/" + url.PathEscape(model) + ":generateContent"
+	return strings.TrimRight(baseURL, "/") + generateContentPathPrefix + url.PathEscape(model) + generateContentPathSuffix
 }

@@ -1,4 +1,4 @@
-package jsonx
+package strictjson
 
 import "testing"
 

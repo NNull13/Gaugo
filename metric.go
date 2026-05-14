@@ -1,238 +1,118 @@
 package gaugo
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
+	"time"
 
-	"github.com/nnull13/gaugo/internal/metrics/answerrelevancy"
-	"github.com/nnull13/gaugo/internal/metrics/contextrelevancy"
-	"github.com/nnull13/gaugo/internal/metrics/faithfulness"
-	"github.com/nnull13/gaugo/internal/prompt"
+	"github.com/nnull13/gaugo/metric"
 )
 
-const (
-	metricNameFaithfulness     = "Faithfulness"
-	metricNameAnswerRelevancy  = "AnswerRelevancy"
-	metricNameContextRelevancy = "ContextRelevancy"
-
-	errJudgeEvaluationFailed = "judge evaluation failed: %w"
-	errMetricRequiresJudge   = "%s metric requires a configured judge"
-	errMetricParseFailed     = "%s parse failed: %w"
-	errMetricMarshalFailed   = "%s marshal details failed: %w"
-
-	metricLabelFaithfulness     = "faithfulness"
-	metricLabelAnswerRelevancy  = "answer relevancy"
-	metricLabelContextRelevancy = "context relevancy"
+type (
+	Metric        = metric.Metric
+	MetricResult  = metric.Result
+	MetricOption  = metric.Option
+	Judge         = metric.Judge
+	JudgeRequest  = metric.JudgeRequest
+	JudgeResponse = metric.JudgeResponse
+	EvalInput     = metric.EvalInput
+	Input         = metric.Input
+	Output        = metric.Output
+	Expected      = metric.Expected
+	Document      = metric.Document
 )
 
-// Metric evaluates a completed case and returns a score plus pass/fail result.
-type Metric interface {
-	Name() string
-	Evaluate(ctx context.Context, in EvalInput, j Judge) (MetricResult, error)
-}
+// Doc is a convenience constructor for Document.
+func Doc(id, text string) Document { return metric.Doc(id, text) }
 
-type metricConfig struct {
-	threshold float64
-	err       error
-}
+// WithThreshold sets the pass/fail threshold in [0,1]. Default is 0.7.
+func WithThreshold(v float64) MetricOption { return metric.WithThreshold(v) }
 
-// MetricOption configures a built-in metric.
-type MetricOption func(*metricConfig)
+// WithSchema sets the JSON Schema used by SchemaCompliance.
+func WithSchema(schema json.RawMessage) MetricOption { return metric.WithSchema(schema) }
 
-// WithThreshold sets pass/fail threshold in [0,1].
-func WithThreshold(v float64) MetricOption {
-	return func(c *metricConfig) {
-		if v < 0 || v > 1 {
-			c.err = fmt.Errorf("threshold must be in [0,1], got %f", v)
-			return
-		}
-		c.threshold = v
-	}
-}
+// WithExpectedFields sets the dotted JSON paths and expected values used by ExpectedJSON.
+func WithExpectedFields(fields map[string]any) MetricOption { return metric.WithExpectedFields(fields) }
 
-func applyMetricOptions(opts []MetricOption) (metricConfig, error) {
-	cfg := metricConfig{threshold: 0.7}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(&cfg)
-		}
-	}
-	if cfg.err != nil {
-		return metricConfig{}, cfg.err
-	}
-	return cfg, nil
-}
+// WithMaxLatency sets the maximum allowed run latency for Latency.
+func WithMaxLatency(d time.Duration) MetricOption { return metric.WithMaxLatency(d) }
 
-// Faithfulness returns a metric that scores whether the answer is supported by context.
-func Faithfulness(opts ...MetricOption) Metric {
-	cfg, err := applyMetricOptions(opts)
-	if err != nil {
-		return invalidMetric{name: metricNameFaithfulness, err: err}
-	}
-	return faithfulnessMetric{cfg: cfg}
-}
+// WithMinLength sets the minimum allowed answer length in runes.
+func WithMinLength(n int) MetricOption { return metric.WithMinLength(n) }
 
-// AnswerRelevancy returns a metric that scores whether the answer addresses the input.
-func AnswerRelevancy(opts ...MetricOption) Metric {
-	cfg, err := applyMetricOptions(opts)
-	if err != nil {
-		return invalidMetric{name: metricNameAnswerRelevancy, err: err}
-	}
-	return answerRelevancyMetric{cfg: cfg}
-}
+// WithMaxLength sets the maximum allowed answer length in runes.
+func WithMaxLength(n int) MetricOption { return metric.WithMaxLength(n) }
 
-// ContextRelevancy returns a metric that scores whether context documents are relevant to the input.
-func ContextRelevancy(opts ...MetricOption) Metric {
-	cfg, err := applyMetricOptions(opts)
-	if err != nil {
-		return invalidMetric{name: metricNameContextRelevancy, err: err}
-	}
-	return contextRelevancyMetric{cfg: cfg}
-}
+// Judge-based metrics.
 
-type invalidMetric struct {
-	name string
-	err  error
-}
+// Faithfulness scores whether the answer is supported by the provided context.
+func Faithfulness(opts ...MetricOption) Metric { return metric.Faithfulness(opts...) }
 
-func (m invalidMetric) Name() string { return m.name }
+// AnswerRelevancy scores how well the answer addresses the question.
+func AnswerRelevancy(opts ...MetricOption) Metric { return metric.AnswerRelevancy(opts...) }
 
-func (m invalidMetric) Evaluate(context.Context, EvalInput, Judge) (MetricResult, error) {
-	return MetricResult{}, m.err
-}
+// ContextRelevancy scores how relevant each context document is to the question.
+func ContextRelevancy(opts ...MetricOption) Metric { return metric.ContextRelevancy(opts...) }
 
-type faithfulnessMetric struct {
-	cfg metricConfig
-}
+// ContextPrecision scores the fraction of context documents that are useful.
+func ContextPrecision(opts ...MetricOption) Metric { return metric.ContextPrecision(opts...) }
 
-func (m faithfulnessMetric) Name() string { return metricNameFaithfulness }
+// ContextRecall scores how much of the expected answer is supported by the context.
+func ContextRecall(opts ...MetricOption) Metric { return metric.ContextRecall(opts...) }
 
-func (m faithfulnessMetric) Evaluate(ctx context.Context, in EvalInput, j Judge) (MetricResult, error) {
-	if j == nil {
-		return MetricResult{}, fmt.Errorf(errMetricRequiresJudge, metricLabelFaithfulness)
-	}
+// AnswerCorrectness scores how well the answer matches Expected.Answer.
+func AnswerCorrectness(opts ...MetricOption) Metric { return metric.AnswerCorrectness(opts...) }
 
-	resp, err := j.EvaluateJSON(ctx, JudgeRequest{
-		Metric:       m.Name(),
-		Question:     in.Input.Question,
-		Answer:       in.Output.Answer,
-		ContextDocs:  in.Input.Context,
-		Instructions: prompt.FaithfulnessInstructions(),
-		Schema:       prompt.FaithfulnessSchema(),
-	})
-	if err != nil {
-		return MetricResult{}, fmt.Errorf(errJudgeEvaluationFailed, err)
-	}
+// Hallucination scores the fraction of claims that are not hallucinated.
+func Hallucination(opts ...MetricOption) Metric { return metric.Hallucination(opts...) }
 
-	var parsed faithfulness.Output
-	parsed, err = faithfulness.Parse(resp.RawJSON)
-	if err != nil {
-		return MetricResult{}, fmt.Errorf(errMetricParseFailed, metricLabelFaithfulness, err)
-	}
+// Toxicity scores how non-toxic the answer is.
+func Toxicity(opts ...MetricOption) Metric { return metric.Toxicity(opts...) }
 
-	score := faithfulness.Score(parsed.Claims)
+// Bias scores how unbiased the answer is.
+func Bias(opts ...MetricOption) Metric { return metric.Bias(opts...) }
 
-	var details []byte
-	details, err = json.Marshal(parsed)
-	if err != nil {
-		return MetricResult{}, fmt.Errorf(errMetricMarshalFailed, metricLabelFaithfulness, err)
-	}
+// Coherence scores how internally consistent the answer is.
+func Coherence(opts ...MetricOption) Metric { return metric.Coherence(opts...) }
 
-	return MetricResult{
-		Name:    m.Name(),
-		Score:   score,
-		Pass:    score >= m.cfg.threshold,
-		Reason:  parsed.Reason,
-		Details: details,
-	}, nil
-}
+// Conciseness scores how succinct the answer is without losing meaning.
+func Conciseness(opts ...MetricOption) Metric { return metric.Conciseness(opts...) }
 
-type contextRelevancyMetric struct {
-	cfg metricConfig
-}
+// Completeness scores how completely the answer addresses the question.
+func Completeness(opts ...MetricOption) Metric { return metric.Completeness(opts...) }
 
-func (m contextRelevancyMetric) Name() string { return metricNameContextRelevancy }
+// InstructionAdherence scores how closely the answer followed Expected.Instructions.
+func InstructionAdherence(opts ...MetricOption) Metric { return metric.InstructionAdherence(opts...) }
 
-func (m contextRelevancyMetric) Evaluate(ctx context.Context, in EvalInput, j Judge) (MetricResult, error) {
-	if j == nil {
-		return MetricResult{}, fmt.Errorf(errMetricRequiresJudge, metricLabelContextRelevancy)
-	}
+// CitationAccuracy scores how accurate inline citations are against context.
+func CitationAccuracy(opts ...MetricOption) Metric { return metric.CitationAccuracy(opts...) }
 
-	resp, err := j.EvaluateJSON(ctx, JudgeRequest{
-		Metric:       m.Name(),
-		Question:     in.Input.Question,
-		ContextDocs:  in.Input.Context,
-		Instructions: prompt.ContextRelevancyInstructions(),
-		Schema:       prompt.ContextRelevancySchema(),
-	})
-	if err != nil {
-		return MetricResult{}, fmt.Errorf(errJudgeEvaluationFailed, err)
-	}
+// SummarizationQuality scores summary coverage, fidelity and conciseness.
+func SummarizationQuality(opts ...MetricOption) Metric { return metric.SummarizationQuality(opts...) }
 
-	var parsed contextrelevancy.Output
-	parsed, err = contextrelevancy.Parse(resp.RawJSON)
-	if err != nil {
-		return MetricResult{}, fmt.Errorf(errMetricParseFailed, metricLabelContextRelevancy, err)
-	}
+// GEval scores along a free-form criteria string. Criteria must be non-empty.
+func GEval(criteria string, opts ...MetricOption) Metric { return metric.GEval(criteria, opts...) }
 
-	score := contextrelevancy.Score(parsed.Documents)
+// Deterministic metrics.
 
-	var details []byte
-	details, err = json.Marshal(parsed)
-	if err != nil {
-		return MetricResult{}, fmt.Errorf(errMetricMarshalFailed, metricLabelContextRelevancy, err)
-	}
+// JSONValidity scores whether the answer parses as valid JSON.
+func JSONValidity(opts ...MetricOption) Metric { return metric.JSONValidity(opts...) }
 
-	return MetricResult{
-		Name:    m.Name(),
-		Score:   score,
-		Pass:    score >= m.cfg.threshold,
-		Reason:  parsed.Reason,
-		Details: details,
-	}, nil
-}
+// SchemaCompliance scores whether the answer matches the configured JSON schema.
+func SchemaCompliance(opts ...MetricOption) Metric { return metric.SchemaCompliance(opts...) }
 
-type answerRelevancyMetric struct {
-	cfg metricConfig
-}
+// ExpectedJSON scores how many expected JSON fields match the answer.
+func ExpectedJSON(opts ...MetricOption) Metric { return metric.ExpectedJSON(opts...) }
 
-func (m answerRelevancyMetric) Name() string { return metricNameAnswerRelevancy }
+// AnswerSimilarity scores Jaccard token overlap against Expected.Answer.
+func AnswerSimilarity(opts ...MetricOption) Metric { return metric.AnswerSimilarity(opts...) }
 
-func (m answerRelevancyMetric) Evaluate(ctx context.Context, in EvalInput, j Judge) (MetricResult, error) {
-	if j == nil {
-		return MetricResult{}, fmt.Errorf(errMetricRequiresJudge, metricLabelAnswerRelevancy)
-	}
+// Latency scores whether the run elapsed within the configured maximum.
+func Latency(opts ...MetricOption) Metric { return metric.Latency(opts...) }
 
-	resp, err := j.EvaluateJSON(ctx, JudgeRequest{
-		Metric:       m.Name(),
-		Question:     in.Input.Question,
-		Answer:       in.Output.Answer,
-		ContextDocs:  in.Input.Context,
-		Instructions: prompt.AnswerRelevancyInstructions(),
-		Schema:       prompt.AnswerRelevancySchema(),
-	})
-	if err != nil {
-		return MetricResult{}, fmt.Errorf(errJudgeEvaluationFailed, err)
-	}
+// AnswerLength scores whether the answer length lies in [min,max] runes.
+func AnswerLength(opts ...MetricOption) Metric { return metric.AnswerLength(opts...) }
 
-	var parsed answerrelevancy.Output
-	parsed, err = answerrelevancy.Parse(resp.RawJSON)
-	if err != nil {
-		return MetricResult{}, fmt.Errorf(errMetricParseFailed, metricLabelAnswerRelevancy, err)
-	}
-
-	var details []byte
-	details, err = json.Marshal(parsed)
-	if err != nil {
-		return MetricResult{}, fmt.Errorf(errMetricMarshalFailed, metricLabelAnswerRelevancy, err)
-	}
-
-	return MetricResult{
-		Name:    m.Name(),
-		Score:   parsed.Score,
-		Pass:    parsed.Score >= m.cfg.threshold,
-		Reason:  parsed.Reason,
-		Details: details,
-	}, nil
+// ExpectedRegex scores whether the answer matches a Go regular expression.
+func ExpectedRegex(pattern string, opts ...MetricOption) Metric {
+	return metric.ExpectedRegex(pattern, opts...)
 }

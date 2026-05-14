@@ -13,11 +13,17 @@ import (
 )
 
 const (
+	// metricNameExpectedContains is the Name reported by the synthetic metric
+	// generated for cases that configure Expected.Contains assertions.
 	metricNameExpectedContains = "ExpectedContains"
-	panicValueRedacted         = "redacted"
-	componentRunFunction       = "run function"
-	componentReporter          = "reporter"
-	detailsTruncatedSuffix     = "...(truncated)"
+
+	// panicValueRedacted replaces a panic's value in user-facing strings so
+	// that secrets in recovered panics cannot leak into logs or test output.
+	panicValueRedacted = "redacted"
+
+	// detailsTruncatedSuffix is appended to MetricResult.Details when the
+	// payload exceeds the configured byte limit.
+	detailsTruncatedSuffix = "...(truncated)"
 )
 
 // Runner executes registered cases and returns structured results without
@@ -81,7 +87,8 @@ func (r *Runner) Case(name string, opts ...CaseOption) error {
 		}
 		opt(&c)
 	}
-	if err := validateCase(c); err != nil {
+	err := validateCase(c)
+	if err != nil {
 		return err
 	}
 
@@ -99,7 +106,8 @@ func (r *Runner) Case(name string, opts ...CaseOption) error {
 // Case registers one evaluation case and fails the test if it is invalid.
 func (s *Suite) Case(name string, opts ...CaseOption) {
 	s.t.Helper()
-	if err := s.runner.Case(name, opts...); err != nil {
+	err := s.runner.Case(name, opts...)
+	if err != nil {
 		s.t.Fatalf("gaugo case invalid: %v", err)
 	}
 }
@@ -123,8 +131,8 @@ func (r *Runner) Run(ctx context.Context, run RunFunc, metrics ...Metric) (RunRe
 	}
 
 	metrics = compactMetrics(metrics)
-	if len(metrics) == 0 && !containsChecksConfigured(cases) {
-		return RunResult{}, errors.New("no effective metrics provided and no ExpectedContains assertions configured")
+	if err := validateEffectiveChecks(cases, metrics); err != nil {
+		return RunResult{}, err
 	}
 
 	result := RunResult{
@@ -149,9 +157,10 @@ func (r *Runner) Run(ctx context.Context, run RunFunc, metrics ...Metric) (RunRe
 		defer cancel()
 
 		out, err := runFuncSafely(caseCtx, run, c.Input)
+		runElapsed := time.Since(start)
 		if err != nil {
 			result.Cases[index].RunError = fmt.Errorf("run failed: %w", err)
-			result.Cases[index].Elapsed = time.Since(start)
+			result.Cases[index].Elapsed = runElapsed
 			return
 		}
 
@@ -165,10 +174,29 @@ func (r *Runner) Run(ctx context.Context, run RunFunc, metrics ...Metric) (RunRe
 			Input:    c.Input,
 			Output:   out,
 			Expected: c.Expected,
+			Elapsed:  runElapsed,
+		}
+
+		if cap(result.Cases[index].Metrics) < len(metrics)+1 {
+			pre := make([]MetricResult, 0, len(metrics)+1)
+			pre = append(pre, result.Cases[index].Metrics...)
+			result.Cases[index].Metrics = pre
 		}
 
 		for _, metric := range metrics {
 			metricName := metricNameSafely(metric)
+			if ctxErr := caseCtx.Err(); ctxErr != nil {
+				mr := MetricResult{
+					Name:    metricName,
+					Score:   0,
+					Pass:    false,
+					Reason:  ctxErr.Error(),
+					Details: limitDetails(errorInfoDetails(ctxErr), r.cfg.detailsMax),
+				}
+				result.Cases[index].Metrics = append(result.Cases[index].Metrics, mr)
+				break
+			}
+
 			mr, mErr := evaluateMetricSafely(caseCtx, metricName, metric, evalIn, r.cfg.judge)
 			if mErr != nil {
 				mr = MetricResult{
@@ -181,6 +209,9 @@ func (r *Runner) Run(ctx context.Context, run RunFunc, metrics ...Metric) (RunRe
 			}
 			mr.Details = limitDetails(mr.Details, r.cfg.detailsMax)
 			result.Cases[index].Metrics = append(result.Cases[index].Metrics, mr)
+			if mErr != nil && metricErrorCanceled(caseCtx, mErr) {
+				break
+			}
 		}
 
 		result.Cases[index].Elapsed = time.Since(start)
@@ -196,7 +227,8 @@ func (r *Runner) Run(ctx context.Context, run RunFunc, metrics ...Metric) (RunRe
 	}
 
 	if r.cfg.reporter != nil {
-		if err := reportSafely(ctx, r.cfg.reporter, result); err != nil {
+		err := reportSafely(ctx, r.cfg.reporter, result)
+		if err != nil {
 			return result, err
 		}
 	}
@@ -221,13 +253,45 @@ func compactMetrics(metrics []Metric) []Metric {
 	if len(metrics) == 0 {
 		return nil
 	}
-	out := make([]Metric, 0, len(metrics))
 	for _, metric := range metrics {
-		if metric != nil {
-			out = append(out, metric)
+		if metric == nil {
+			out := make([]Metric, 0, len(metrics))
+			for _, m := range metrics {
+				if m != nil {
+					out = append(out, m)
+				}
+			}
+			return out
 		}
 	}
-	return out
+	return metrics
+}
+
+func validateEffectiveChecks(cases []Case, metrics []Metric) error {
+	if len(metrics) > 0 {
+		return nil
+	}
+	withoutChecks := make([]string, 0)
+	for _, c := range cases {
+		if len(c.Expected.Contains) == 0 {
+			withoutChecks = append(withoutChecks, c.Name)
+		}
+	}
+	if len(withoutChecks) == 0 {
+		return nil
+	}
+	return fmt.Errorf("no effective metrics for cases %q: provide global metrics or ExpectedContains for every case", withoutChecks)
+}
+
+func metricErrorCanceled(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	ctxErr := ctx.Err()
+	return ctxErr != nil && errors.Is(err, ctxErr)
 }
 
 func limitDetails(details []byte, max int) []byte {
@@ -237,27 +301,16 @@ func limitDetails(details []byte, max int) []byte {
 	if len(details) <= max {
 		return details
 	}
-
-	suffixBytes := []byte(detailsTruncatedSuffix)
-	if max <= len(suffixBytes) {
-		trimmed := make([]byte, max)
-		copy(trimmed, details[:max])
-		return trimmed
+	out := make([]byte, max)
+	suffix := []byte(detailsTruncatedSuffix)
+	if max <= len(suffix) {
+		copy(out, details[:max])
+		return out
 	}
-
-	trimmed := make([]byte, max)
-	copy(trimmed, details[:max-len(suffixBytes)])
-	copy(trimmed[max-len(suffixBytes):], suffixBytes)
-	return trimmed
-}
-
-func containsChecksConfigured(cases []Case) bool {
-	for _, c := range cases {
-		if len(c.Expected.Contains) > 0 {
-			return true
-		}
-	}
-	return false
+	headLen := max - len(suffix)
+	copy(out, details[:headLen])
+	copy(out[headLen:], suffix)
+	return out
 }
 
 func expectedContainsResult(answer string, expected Expected) (MetricResult, bool) {
@@ -293,7 +346,7 @@ func expectedContainsResult(answer string, expected Expected) (MetricResult, boo
 func runFuncSafely(ctx context.Context, run RunFunc, in Input) (out Output, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = newPanicError(componentRunFunction, recovered)
+			err = newPanicError("run function", recovered)
 		}
 	}()
 	return run(ctx, in)
@@ -311,7 +364,7 @@ func evaluateMetricSafely(ctx context.Context, metricName string, metric Metric,
 func reportSafely(ctx context.Context, reporter Reporter, result RunResult) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = newPanicError(componentReporter, recovered)
+			err = newPanicError("reporter", recovered)
 		}
 	}()
 	reporter.Report(ctx, result)

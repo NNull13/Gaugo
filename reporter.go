@@ -7,6 +7,10 @@ import (
 	"testing"
 )
 
+// maxFailureLogs caps the number of per-failure log lines emitted by Assert
+// before further failures are summarised rather than logged individually.
+const maxFailureLogs = 100
+
 // Reporter receives completed suite results without depending on testing.T.
 type Reporter interface {
 	Report(ctx context.Context, result RunResult)
@@ -15,8 +19,6 @@ type Reporter interface {
 // Assert reports result failures through the Go testing package.
 func Assert(t testing.TB, result RunResult) {
 	t.Helper()
-
-	const maxFailureLogs = 100
 
 	failed := false
 	loggedFailures := 0
@@ -62,7 +64,8 @@ func Assert(t testing.TB, result RunResult) {
 	}
 
 	if !failed {
-		t.Logf("gaugo summary: cases=%d failed_cases=0 metrics=%d failed_metrics=0", len(result.Cases), totalMetrics)
+		t.Logf("gaugo summary: cases=%d failed_cases=0 metrics=%d failed_metrics=0",
+			len(result.Cases), totalMetrics)
 		return
 	}
 
@@ -72,11 +75,13 @@ func Assert(t testing.TB, result RunResult) {
 	}
 	sort.Strings(metricNames)
 	for _, name := range metricNames {
-		t.Logf("gaugo metric summary: name=%q failed=%d total=%d", name, metricFailed[name], metricTotals[name])
+		t.Logf("gaugo metric summary: name=%q failed=%d total=%d",
+			name, metricFailed[name], metricTotals[name])
 	}
 
 	if suppressedFailures > 0 {
-		t.Errorf("gaugo: suppressed %d additional failure log(s) after first %d", suppressedFailures, maxFailureLogs)
+		t.Errorf("gaugo: suppressed %d additional failure log(s) after first %d",
+			suppressedFailures, maxFailureLogs)
 	}
 
 	t.Logf("gaugo summary: cases=%d failed_cases=%d metrics=%d failed_metrics=%d logged_failures=%d",
@@ -85,17 +90,19 @@ func Assert(t testing.TB, result RunResult) {
 
 func metricFailureMetadata(m MetricResult) string {
 	metadata := fmt.Sprintf("details_bytes=%d", len(m.Details))
-	if info, ok := MetricErrorInfo(m); ok {
-		metadata += fmt.Sprintf(" error_kind=%q", info.Kind)
-		if info.Provider != "" {
-			metadata += fmt.Sprintf(" provider=%q", info.Provider)
-		}
-		if info.StatusCode != 0 {
-			metadata += fmt.Sprintf(" status_code=%d", info.StatusCode)
-		}
-		if info.RequestID != "" {
-			metadata += fmt.Sprintf(" request_id=%q", info.RequestID)
-		}
+	info, ok := MetricErrorInfo(m)
+	if !ok {
+		return metadata
+	}
+	metadata += fmt.Sprintf(" error_kind=%q", info.Kind)
+	if info.Provider != "" {
+		metadata += fmt.Sprintf(" provider=%q", info.Provider)
+	}
+	if info.StatusCode != 0 {
+		metadata += fmt.Sprintf(" status_code=%d", info.StatusCode)
+	}
+	if info.RequestID != "" {
+		metadata += fmt.Sprintf(" request_id=%q", info.RequestID)
 	}
 	return metadata
 }

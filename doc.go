@@ -27,12 +27,30 @@
 //
 // # Built-in metrics
 //
-// Three metrics cover the RAG evaluation triad:
-//   - [Faithfulness] — is the answer supported by the provided context?
-//   - [AnswerRelevancy] — does the answer address the question?
-//   - [ContextRelevancy] — are the retrieved documents useful for the question?
+// Built-in metrics cover RAG, safety, generation quality, structured output,
+// instruction following, domain-specific checks, and deterministic contracts.
+//
+// RAG and answer quality:
+//   - [Faithfulness], [AnswerRelevancy], [ContextRelevancy]
+//   - [ContextPrecision], [ContextRecall], [AnswerCorrectness]
+//
+// Safety and generation quality:
+//   - [Hallucination], [Toxicity], [Bias]
+//   - [Coherence], [Conciseness], [Completeness]
+//
+// Structured output and deterministic checks:
+//   - [JSONValidity], [SchemaCompliance], [ExpectedJSON]
+//   - [AnswerSimilarity], [Latency], [AnswerLength], [ExpectedRegex]
+//
+// Instruction and domain-specific metrics:
+//   - [InstructionAdherence], [GEval]
+//   - [CitationAccuracy], [SummarizationQuality]
 //
 // All metrics accept [WithThreshold] to set a custom pass/fail score in [0,1].
+// Metric interfaces, shared input/output types, and built-in constructors also
+// live in the [github.com/nnull13/gaugo/metric] sub-package. The root package
+// re-exports that public surface so callers can use either [Faithfulness] or
+// metric.Faithfulness interchangeably.
 //
 // # Provider judges
 //

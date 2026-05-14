@@ -1,6 +1,7 @@
 package gaugo
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"time"
@@ -53,7 +54,7 @@ func WithCaseTimeout(d time.Duration) Option {
 func WithReporter(r Reporter) Option {
 	return func(c *config) error {
 		if r == nil {
-			return fmt.Errorf("reporter cannot be nil")
+			return errors.New("reporter cannot be nil")
 		}
 		c.reporter = r
 		return nil
@@ -89,7 +90,8 @@ func applyOptions(opts []Option) (config, error) {
 		if opt == nil {
 			continue
 		}
-		if err := opt(&cfg); err != nil {
+		err := opt(&cfg)
+		if err != nil {
 			return config{}, err
 		}
 	}

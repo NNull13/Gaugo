@@ -67,6 +67,46 @@ func TestClassifyErrorInferMetricParse(t *testing.T) {
 	}
 }
 
+func TestClassifyErrorFromStructuredMetricErrors(t *testing.T) {
+	t.Parallel()
+
+	// metric configuration error: calling a judge-backed metric without a Judge.
+	_, configErr := Faithfulness().Evaluate(context.Background(), EvalInput{}, nil)
+
+	// metric parse error: judge returns malformed JSON the metric cannot decode.
+	parseJudge := fakeJudge{
+		eval: func(context.Context, JudgeRequest) (JudgeResponse, error) {
+			return JudgeResponse{RawJSON: []byte(`{"score":2,"reason":"out of range"}`)}, nil
+		},
+	}
+	_, parseErr := AnswerRelevancy().Evaluate(context.Background(), EvalInput{
+		Input:  Input{Question: "Q"},
+		Output: Output{Answer: "A"},
+	}, parseJudge)
+
+	// metric option error: an out-of-range threshold surfaces at Evaluate time.
+	_, optionErr := Faithfulness(WithThreshold(2.0)).Evaluate(context.Background(), EvalInput{}, nil)
+
+	tests := []struct {
+		name string
+		err  error
+		want ErrorKind
+	}{
+		{name: "metric configuration", err: configErr, want: ErrorKindMetric},
+		{name: "metric parse", err: parseErr, want: ErrorKindMetricParse},
+		{name: "metric option", err: optionErr, want: ErrorKindMetric},
+	}
+	for _, tt := range tests {
+		if tt.err == nil {
+			t.Fatalf("%s setup did not produce an error", tt.name)
+		}
+		info := ClassifyError(tt.err)
+		if info.Kind != tt.want {
+			t.Fatalf("%s kind got=%q want=%q", tt.name, info.Kind, tt.want)
+		}
+	}
+}
+
 // statusCodeOnlyError implements gaugoStatusCodeError but not gaugoKindError,
 // exercising the kindFromStatusCode path in ClassifyError.
 type statusCodeOnlyError struct {
@@ -110,5 +150,29 @@ func TestClassifyErrorWrappedStatusCodePreservesKind(t *testing.T) {
 	info := ClassifyError(wrapped)
 	if info.Kind != ErrorKindProviderRateLimit {
 		t.Fatalf("wrapped status code kind got=%q want=%q", info.Kind, ErrorKindProviderRateLimit)
+	}
+}
+
+func TestClassifyErrorJudgeEvaluationPreservesProviderKind(t *testing.T) {
+	t.Parallel()
+
+	// A Judge that fails with a 429-tagged transport error should propagate
+	// through Faithfulness.Evaluate as a provider-rate-limit classification,
+	// not a generic metric error.
+	j := fakeJudge{
+		eval: func(context.Context, JudgeRequest) (JudgeResponse, error) {
+			return JudgeResponse{}, statusCodeOnlyError{code: 429}
+		},
+	}
+	_, err := Faithfulness().Evaluate(context.Background(), EvalInput{
+		Input:  Input{Question: "Q"},
+		Output: Output{Answer: "A"},
+	}, j)
+	if err == nil {
+		t.Fatal("expected judge error to propagate")
+	}
+	info := ClassifyError(err)
+	if info.Kind != ErrorKindProviderRateLimit {
+		t.Fatalf("judge provider kind got=%q want=%q", info.Kind, ErrorKindProviderRateLimit)
 	}
 }

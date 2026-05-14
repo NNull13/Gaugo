@@ -1,9 +1,7 @@
 package answerrelevancy
 
 import (
-	"fmt"
-
-	"github.com/nnull13/gaugo/internal/jsonx"
+	"github.com/nnull13/gaugo/internal/metrics"
 )
 
 const parseErrorPrefix = "parse answer relevancy response"
@@ -20,17 +18,19 @@ func Parse(raw []byte) (Output, error) {
 		Reason *string  `json:"reason"`
 		Issues []string `json:"issues,omitempty"`
 	}
-	if err := jsonx.DecodeStrict(raw, &decoded); err != nil {
-		return Output{}, fmt.Errorf("%s: %w", parseErrorPrefix, err)
+	err := metrics.DecodeStrict(raw, &decoded, parseErrorPrefix)
+	if err != nil {
+		return Output{}, err
 	}
 	if decoded.Score == nil {
-		return Output{}, fmt.Errorf("%s: missing required field score", parseErrorPrefix)
+		return Output{}, metrics.MissingRequiredField(parseErrorPrefix, "score")
 	}
 	if decoded.Reason == nil {
-		return Output{}, fmt.Errorf("%s: missing required field reason", parseErrorPrefix)
+		return Output{}, metrics.MissingRequiredField(parseErrorPrefix, "reason")
 	}
-	if *decoded.Score < 0 || *decoded.Score > 1 {
-		return Output{}, fmt.Errorf("%s: score must be in [0,1], got %f", parseErrorPrefix, *decoded.Score)
+	err = metrics.Range01(parseErrorPrefix, "score", *decoded.Score)
+	if err != nil {
+		return Output{}, err
 	}
 	return Output{
 		Score:  *decoded.Score,

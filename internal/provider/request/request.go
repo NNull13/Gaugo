@@ -20,8 +20,14 @@ func ToEval(req gaugo.JudgeRequest) wire.EvalRequest {
 	return wire.EvalRequest{
 		Metric:       strings.TrimSpace(req.Metric),
 		Instructions: strings.TrimSpace(req.Instructions),
-		UserPrompt:   prompt.BuildUserPrompt(req.Question, req.Answer, docs),
-		Schema:       req.Schema,
+		UserPrompt: prompt.BuildUserPromptWithExpectedAndInstructions(
+			req.Question,
+			req.Answer,
+			req.ExpectedAnswer,
+			req.ExpectedInstructions,
+			docs,
+		),
+		Schema: req.Schema,
 	}
 }
 

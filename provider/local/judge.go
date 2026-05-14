@@ -85,7 +85,7 @@ func (j *Judge) EvaluateJSON(ctx context.Context, req gaugo.JudgeRequest) (gaugo
 func (j *Judge) evalNative(ctx context.Context, req wire.EvalRequest) (gaugo.JudgeResponse, error) {
 	res, err := nativechat.EvaluateJSON(ctx, nativechat.Config{
 		APIKey:          strings.TrimSpace(j.cfg.APIKey),
-		Model:           j.cfg.Model,
+		Model:           localModel(j.cfg.Model),
 		BaseURL:         defaultBaseURL(j.cfg.BaseURL),
 		EndpointURL:     j.cfg.EndpointURL,
 		HTTPClient:      j.cfg.HTTPClient,
@@ -96,10 +96,11 @@ func (j *Judge) evalNative(ctx context.Context, req wire.EvalRequest) (gaugo.Jud
 		return gaugo.JudgeResponse{}, err
 	}
 	return gaugo.JudgeResponse{
-		RawJSON:  res.RawJSON,
-		Provider: provider.Local,
-		Model:    res.Model,
-		Latency:  res.Latency,
+		RawJSON:   res.RawJSON,
+		Provider:  provider.Local,
+		Model:     res.Model,
+		RequestID: res.RequestID,
+		Latency:   res.Latency,
 	}, nil
 }
 
@@ -123,7 +124,7 @@ func (j *Judge) evalOpenAI(ctx context.Context, req wire.EvalRequest) (gaugo.Jud
 		res, err = responses.EvaluateJSON(ctx, responses.Config{
 			Provider:        provider.Local,
 			APIKey:          apiKey,
-			Model:           j.cfg.Model,
+			Model:           localModel(j.cfg.Model),
 			BaseURL:         openAICompatBaseURL(j.cfg.BaseURL),
 			EndpointURL:     j.cfg.EndpointURL,
 			HTTPClient:      j.cfg.HTTPClient,
@@ -134,7 +135,7 @@ func (j *Judge) evalOpenAI(ctx context.Context, req wire.EvalRequest) (gaugo.Jud
 		res, err = chat.EvaluateJSON(ctx, chat.Config{
 			Provider:        provider.Local,
 			APIKey:          apiKey,
-			Model:           j.cfg.Model,
+			Model:           localModel(j.cfg.Model),
 			BaseURL:         openAICompatBaseURL(j.cfg.BaseURL),
 			EndpointURL:     j.cfg.EndpointURL,
 			HTTPClient:      j.cfg.HTTPClient,
@@ -146,10 +147,11 @@ func (j *Judge) evalOpenAI(ctx context.Context, req wire.EvalRequest) (gaugo.Jud
 		return gaugo.JudgeResponse{}, err
 	}
 	return gaugo.JudgeResponse{
-		RawJSON:  res.RawJSON,
-		Provider: provider.Local,
-		Model:    res.Model,
-		Latency:  res.Latency,
+		RawJSON:   res.RawJSON,
+		Provider:  provider.Local,
+		Model:     res.Model,
+		RequestID: res.RequestID,
+		Latency:   res.Latency,
 	}, nil
 }
 
@@ -160,8 +162,9 @@ func (j *Judge) evalAnthropic(ctx context.Context, req wire.EvalRequest) (gaugo.
 	}
 
 	res, err := messages.EvaluateJSON(ctx, messages.Config{
+		Provider:        provider.Local,
 		APIKey:          apiKey,
-		Model:           j.cfg.Model,
+		Model:           localModel(j.cfg.Model),
 		BaseURL:         defaultBaseURL(j.cfg.BaseURL),
 		EndpointURL:     j.cfg.EndpointURL,
 		APIVersion:      j.cfg.AnthropicAPIVersion,
@@ -174,11 +177,20 @@ func (j *Judge) evalAnthropic(ctx context.Context, req wire.EvalRequest) (gaugo.
 		return gaugo.JudgeResponse{}, err
 	}
 	return gaugo.JudgeResponse{
-		RawJSON:  res.RawJSON,
-		Provider: provider.Local,
-		Model:    res.Model,
-		Latency:  res.Latency,
+		RawJSON:   res.RawJSON,
+		Provider:  provider.Local,
+		Model:     res.Model,
+		RequestID: res.RequestID,
+		Latency:   res.Latency,
 	}, nil
+}
+
+func localModel(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return provider.LocalDefaultModel
+	}
+	return model
 }
 
 func defaultBaseURL(baseURL string) string {
@@ -224,10 +236,12 @@ func validateConfig(cfg Config) (Mode, error) {
 		return "", provider.ConfigWrapError(provider.Local, err)
 	}
 
-	if err := validate.BaseURL(cfg.BaseURL); err != nil {
+	err = validate.BaseURL(cfg.BaseURL)
+	if err != nil {
 		return "", provider.ConfigWrapError(provider.Local, err)
 	}
-	if err := validate.BaseURL(cfg.EndpointURL); err != nil {
+	err = validate.BaseURL(cfg.EndpointURL)
+	if err != nil {
 		return "", provider.ConfigFieldWrapError(provider.Local, provider.FieldEndpointURL, err)
 	}
 
@@ -242,7 +256,8 @@ func validateConfig(cfg Config) (Mode, error) {
 			return "", provider.ConfigErrorf(provider.Local, provider.ConfigUnsupportedOpenAIEndpoint, cfg.OpenAICompatEndpoint)
 		}
 	}
-	if err := cfg.Retry.Validate(); err != nil {
+	err = cfg.Retry.Validate()
+	if err != nil {
 		return "", provider.ConfigWrapError(provider.Local, err)
 	}
 	if cfg.MaxResponseBody < 0 {

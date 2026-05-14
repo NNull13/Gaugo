@@ -13,12 +13,14 @@ func TestToEval(t *testing.T) {
 	t.Parallel()
 
 	in := gaugo.JudgeRequest{
-		Metric:       "  Faithfulness ",
-		Question:     "What is pricing?",
-		Answer:       "Contact sales.",
-		ContextDocs:  []gaugo.Document{{ID: "", Text: "enterprise via sales"}},
-		Instructions: "  Return JSON only  ",
-		Schema:       json.RawMessage(`{"type":"object"}`),
+		Metric:               "  Faithfulness ",
+		Question:             "What is pricing?",
+		Answer:               "Contact sales.",
+		ExpectedAnswer:       "Enterprise customers contact sales.",
+		ExpectedInstructions: "Answer tersely.",
+		ContextDocs:          []gaugo.Document{{ID: "", Text: "enterprise via sales"}},
+		Instructions:         "  Return JSON only  ",
+		Schema:               json.RawMessage(`{"type":"object"}`),
 	}
 	got := ToEval(in)
 
@@ -33,6 +35,12 @@ func TestToEval(t *testing.T) {
 	}
 	if !strings.Contains(got.UserPrompt, "- [doc-1] enterprise via sales") {
 		t.Fatalf("missing context in user prompt: %q", got.UserPrompt)
+	}
+	if !strings.Contains(got.UserPrompt, "Expected Answer:\nEnterprise customers contact sales.") {
+		t.Fatalf("missing expected answer in user prompt: %q", got.UserPrompt)
+	}
+	if !strings.Contains(got.UserPrompt, "Expected Instructions:\nAnswer tersely.") {
+		t.Fatalf("missing expected instructions in user prompt: %q", got.UserPrompt)
 	}
 }
 

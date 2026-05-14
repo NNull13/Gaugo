@@ -21,15 +21,24 @@ type CaseResult struct {
 }
 
 type MetricResult struct {
-    Name    string
-    Score   float64
-    Pass    bool
-    Reason  string
-    Details []byte
+    Name         string
+    Score        float64
+    Pass         bool
+    Reason       string
+    Details      []byte
+    Provider     string
+    Model        string
+    RequestID    string
+    JudgeLatency time.Duration
 }
 ```
 
 `RunResult.Cases` preserves registration order even when cases run concurrently.
+
+For LLM-judged metrics, `Provider`, `Model`, `RequestID`, and `JudgeLatency`
+come from the judge/provider response. Deterministic metrics leave these fields
+empty. `MetricResult.Score` is the canonical score; `Details` is only for
+metric-specific structured debugging data.
 
 ## Programmatic consumption
 
@@ -176,4 +185,4 @@ func (r TestingJSONReporter) Report(ctx context.Context, result gaugo.RunResult)
 
 `MetricResult.Details` stores metric-specific structured details as JSON bytes. Built-in metrics use it for parsed judge output. Details are capped by `WithMetricDetailsLimit` and may be truncated.
 
-Use details for debugging and dashboards, but do not build critical logic around provider-specific detail shapes. The default `gaugo.Assert` reporter logs safe metadata (`details_bytes` and classified error metadata) instead of raw detail payloads.
+Use details for debugging and dashboards, but do not put provider metadata there. Read common metadata from `MetricResult.Provider`, `MetricResult.Model`, `MetricResult.RequestID`, and `MetricResult.JudgeLatency`. The default `gaugo.Assert` reporter logs safe metadata (`details_bytes` and classified error metadata) instead of raw detail payloads.

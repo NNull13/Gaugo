@@ -31,7 +31,8 @@ type Judge struct {
 
 // New returns a configured Gemini judge.
 func New(cfg Config) (*Judge, error) {
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		return nil, err
 	}
 	return &Judge{cfg: cfg}, nil
@@ -53,10 +54,11 @@ func (j *Judge) EvaluateJSON(ctx context.Context, req gaugo.JudgeRequest) (gaugo
 		return gaugo.JudgeResponse{}, err
 	}
 	return gaugo.JudgeResponse{
-		RawJSON:  res.RawJSON,
-		Provider: provider.Gemini,
-		Model:    res.Model,
-		Latency:  res.Latency,
+		RawJSON:   res.RawJSON,
+		Provider:  provider.Gemini,
+		Model:     res.Model,
+		RequestID: res.RequestID,
+		Latency:   res.Latency,
 	}, nil
 }
 
@@ -65,13 +67,16 @@ func (cfg Config) Validate() error {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return provider.ConfigError(provider.Gemini, provider.ConfigAPIKeyRequired)
 	}
-	if err := validate.CloudURL(cfg.BaseURL, cfg.AllowUnsafeURL, provider.GeminiHost); err != nil {
+	err := validate.CloudURL(cfg.BaseURL, cfg.AllowUnsafeURL, provider.GeminiHost)
+	if err != nil {
 		return provider.ConfigWrapError(provider.Gemini, err)
 	}
-	if err := validate.CloudURL(cfg.EndpointURL, cfg.AllowUnsafeURL, provider.GeminiHost); err != nil {
+	err = validate.CloudURL(cfg.EndpointURL, cfg.AllowUnsafeURL, provider.GeminiHost)
+	if err != nil {
 		return provider.ConfigFieldWrapError(provider.Gemini, provider.FieldEndpointURL, err)
 	}
-	if err := cfg.Retry.Validate(); err != nil {
+	err = cfg.Retry.Validate()
+	if err != nil {
 		return provider.ConfigWrapError(provider.Gemini, err)
 	}
 	if cfg.MaxResponseBody < 0 {

@@ -1,9 +1,7 @@
 package faithfulness
 
 import (
-	"fmt"
-
-	"github.com/nnull13/gaugo/internal/jsonx"
+	"github.com/nnull13/gaugo/internal/metrics"
 )
 
 const parseErrorPrefix = "parse faithfulness response"
@@ -28,23 +26,24 @@ func Parse(raw []byte) (Output, error) {
 		} `json:"claims"`
 		Reason *string `json:"reason"`
 	}
-	if err := jsonx.DecodeStrict(raw, &decoded); err != nil {
-		return Output{}, fmt.Errorf("%s: %w", parseErrorPrefix, err)
+	err := metrics.DecodeStrict(raw, &decoded, parseErrorPrefix)
+	if err != nil {
+		return Output{}, err
 	}
 	if decoded.Claims == nil {
-		return Output{}, fmt.Errorf("%s: missing required field claims", parseErrorPrefix)
+		return Output{}, metrics.MissingRequiredField(parseErrorPrefix, "claims")
 	}
 	if decoded.Reason == nil {
-		return Output{}, fmt.Errorf("%s: missing required field reason", parseErrorPrefix)
+		return Output{}, metrics.MissingRequiredField(parseErrorPrefix, "reason")
 	}
 
 	claims := make([]Claim, len(*decoded.Claims))
 	for i, c := range *decoded.Claims {
 		if c.Text == nil {
-			return Output{}, fmt.Errorf("%s: claim %d missing required field text", parseErrorPrefix, i)
+			return Output{}, metrics.MissingRequiredNestedField(parseErrorPrefix, "claim", i, "text")
 		}
 		if c.Supported == nil {
-			return Output{}, fmt.Errorf("%s: claim %d missing required field supported", parseErrorPrefix, i)
+			return Output{}, metrics.MissingRequiredNestedField(parseErrorPrefix, "claim", i, "supported")
 		}
 		claims[i] = Claim{
 			Text:      *c.Text,

@@ -2,7 +2,13 @@
 
 ## When to use this
 
-Use this reference when choosing built-in metrics, setting thresholds, or implementing custom metrics. For custom metric implementations, see [Custom Metrics](../extending/custom-metrics.md).
+Use this page as a quick reference for the metric catalog, thresholds, and
+options. For detailed documentation on each metric including scoring algorithms,
+judge schemas, and diagnostic patterns, see the
+[metrics section](../metrics/index.md).
+
+For custom metric implementations, see
+[Custom Metrics](../extending/custom-metrics.md).
 
 ## Metric interface
 
@@ -13,23 +19,49 @@ type Metric interface {
 }
 ```
 
-Metrics run after your `RunFunc` returns an `Output`. Built-in LLM metrics call the configured `Judge` and parse strictly structured JSON.
+Metrics run after your `RunFunc` returns an `Output`. Built-in LLM metrics call the configured `Judge` and parse strictly structured JSON. Deterministic metrics use only the Go standard library.
 
-## RAG quality triad
+The public metric package lives in `github.com/nnull13/gaugo/metric`. The root
+`gaugo` package re-exports the same constructors and types, so both forms are
+equivalent:
 
-For retrieval-augmented generation, treat the built-in RAG metrics as three
-separate questions:
+```go
+gaugo.Faithfulness(gaugo.WithThreshold(0.8))
+metric.Faithfulness(metric.WithThreshold(0.8))
+```
+
+## Built-in metric catalog
+
+| Category | Metrics |
+| --- | --- |
+| RAG | `ContextRelevancy`, `ContextPrecision`, `ContextRecall`, `Faithfulness` |
+| Answer quality | `AnswerRelevancy`, `AnswerCorrectness`, `AnswerSimilarity` |
+| Safety | `Hallucination`, `Toxicity`, `Bias` |
+| Generation quality | `Coherence`, `Conciseness`, `Completeness` |
+| Structured output | `JSONValidity`, `SchemaCompliance`, `ExpectedJSON` |
+| Instructions and custom | `InstructionAdherence`, `GEval` |
+| Domain-specific | `CitationAccuracy`, `SummarizationQuality` |
+| Deterministic contracts | `ExpectedContains`, `Latency`, `AnswerLength`, `ExpectedRegex` |
+
+Metrics that compare against ground truth use `ExpectedAnswer(...)`. `InstructionAdherence` uses `ExpectedInstructions(...)`.
+
+## RAG quality
+
+For retrieval-augmented generation, use multiple metrics to isolate retrieval
+problems from generation problems:
 
 | Metric | What it checks | Typical failure it isolates |
 | --- | --- | --- |
 | `ContextRelevancy` | Are the retrieved context documents useful for the question? | Retrieval returned irrelevant, noisy, or incomplete evidence. |
+| `ContextPrecision` | Of the retrieved documents, how many are actually useful? | Retriever returned too much irrelevant or redundant context. |
+| `ContextRecall` | Does the retrieved context cover the expected answer? | Retriever missed evidence needed for the ground truth. |
 | `Faithfulness` | Is the answer supported by the context documents? | The model added unsupported claims or contradicted evidence. |
 | `AnswerRelevancy` | Does the answer address the user's question? | The answer is grounded but incomplete, evasive, or off-topic. |
+| `AnswerCorrectness` | Does the answer match `ExpectedAnswer` factually? | The model produced a grounded but wrong answer. |
 
-Use the three together when you need to tell retrieval problems apart from
-generation problems. For example, low `ContextRelevancy` usually points at the
-retriever or corpus, while high `ContextRelevancy` with low `Faithfulness`
-usually points at answer generation.
+For example, low `ContextPrecision` points at noisy retrieval, low
+`ContextRecall` points at missing evidence, and high retrieval scores with low
+`Faithfulness` usually points at answer generation.
 
 ## ExpectedContains
 
@@ -107,9 +139,92 @@ suite.Assert(ctx, yourGaugoEvaluation, gaugo.AnswerRelevancy())
 
 Use it when the answer might be factually grounded but incomplete, evasive, off-topic, or not useful for the user's task.
 
+## Ground-truth metrics
+
+`ContextRecall`, `AnswerCorrectness`, and `AnswerSimilarity` require `ExpectedAnswer`.
+
+```go
+suite.Case("refunds",
+    gaugo.Question("How long are refunds available?"),
+    gaugo.ContextDocs(gaugo.Doc("refunds.md", "Refunds are available for 30 days.")),
+    gaugo.ExpectedAnswer("Refunds are available for 30 days."),
+)
+
+suite.Assert(ctx, yourGaugoEvaluation,
+    gaugo.ContextRecall(),
+    gaugo.AnswerCorrectness(),
+    gaugo.AnswerSimilarity(gaugo.WithThreshold(0.6)),
+)
+```
+
+`ContextRecall` is LLM-judged and checks whether the context supports each ground-truth claim. `AnswerCorrectness` is LLM-judged and compares the answer to ground truth. `AnswerSimilarity` is deterministic Jaccard similarity over normalized answer tokens.
+
+## Safety and generation quality
+
+```go
+suite.Assert(ctx, yourGaugoEvaluation,
+    gaugo.Hallucination(),
+    gaugo.Toxicity(),
+    gaugo.Bias(),
+    gaugo.Coherence(),
+    gaugo.Conciseness(),
+    gaugo.Completeness(),
+)
+```
+
+These metrics require a configured `Judge`. Safety scores use `1` as safest or least problematic. Quality scores use `1` as highest quality.
+
+## Structured output
+
+```go
+suite.Assert(ctx, yourGaugoEvaluation,
+    gaugo.JSONValidity(),
+    gaugo.SchemaCompliance(gaugo.WithSchema(json.RawMessage(`{
+        "type":"object",
+        "required":["status"],
+        "properties":{"status":{"type":"string"}}
+    }`))),
+    gaugo.ExpectedJSON(gaugo.WithExpectedFields(map[string]any{
+        "status": "ok",
+    })),
+)
+```
+
+`JSONValidity`, `SchemaCompliance`, and `ExpectedJSON` are deterministic and do not require a judge. `SchemaCompliance` supports a basic JSON Schema subset: object properties, required fields, primitive types, arrays, nested structures, and `additionalProperties:false`.
+
+## Instructions and custom criteria
+
+```go
+suite.Case("format",
+    gaugo.Question("Return a compact answer"),
+    gaugo.ExpectedInstructions("Return valid JSON with no prose."),
+)
+
+suite.Assert(ctx, yourGaugoEvaluation,
+    gaugo.InstructionAdherence(),
+    gaugo.GEval("Prefer answers that are directly actionable."),
+)
+```
+
+`InstructionAdherence` requires `ExpectedInstructions`. `GEval` accepts custom criteria and uses the configured judge.
+
+## Domain-specific and deterministic contracts
+
+```go
+suite.Assert(ctx, yourGaugoEvaluation,
+    gaugo.CitationAccuracy(),
+    gaugo.SummarizationQuality(),
+    gaugo.Latency(gaugo.WithMaxLatency(500*time.Millisecond)),
+    gaugo.AnswerLength(gaugo.WithMinLength(20), gaugo.WithMaxLength(600)),
+    gaugo.ExpectedRegex(`(?i)contact sales`),
+)
+```
+
+`CitationAccuracy` and `SummarizationQuality` require a judge. `Latency`, `AnswerLength`, and `ExpectedRegex` are deterministic.
+
 ## Thresholds
 
-Built-in LLM metrics default to a pass threshold of `0.7`.
+Built-in metrics default to a pass threshold of `0.7` unless a deterministic metric produces a hard `0` or `1` score. Override with `WithThreshold`.
 
 ```go
 suite.Assert(ctx, yourGaugoEvaluation,
@@ -119,7 +234,7 @@ suite.Assert(ctx, yourGaugoEvaluation,
 )
 ```
 
-Thresholds must be in `[0,1]`. Invalid thresholds produce an invalid metric; when used through a runner, that metric becomes a failing `MetricResult`.
+Thresholds must be finite numbers in `[0,1]`. `NaN`, `+Inf`, `-Inf`, and out-of-range values produce an invalid metric; when used through a runner, that metric becomes a failing `MetricResult`.
 
 ## Combining checks
 
@@ -145,7 +260,7 @@ suite.Assert(ctx, yourGaugoEvaluation,
 
 Gaugo rejects runs with no effective checks. At least one of these must be true:
 
-- At least one case has `ExpectedContains`.
+- Every case has `ExpectedContains`.
 - At least one non-nil metric is passed to `Assert` or `Run`.
 
 This prevents test suites that pass without evaluating anything.

@@ -159,4 +159,4 @@ func TestCaptureResults(t *testing.T) {
 - Use `WithCaseTimeout` to prevent one slow case from blocking the whole test.
 - Tune `WithParallelism` to match provider rate limits and test environment capacity.
 
-For the programmatic API, see [Programmatic Runner](programmatic-runner.md). For production hardening, see [Production](production.md).
+For programmatic SDK usage, see [Programmatic Runner](programmatic-runner.md). For production hardening, see [Production](production.md).

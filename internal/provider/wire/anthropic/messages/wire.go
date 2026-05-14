@@ -11,6 +11,7 @@ import (
 )
 
 type Config struct {
+	Provider        string
 	APIKey          string
 	Model           string
 	BaseURL         string
@@ -21,6 +22,15 @@ type Config struct {
 	Retry           wire.RetryConfig
 	MaxResponseBody int64
 }
+
+const (
+	wireName             = "messages"
+	stopReasonRefusal    = "refusal"
+	stopReasonMaxTokens  = "max_tokens"
+	contentTypeText      = "text"
+	schemaKeywordMinimum = "minimum"
+	schemaKeywordMaximum = "maximum"
+)
 
 type requestBody struct {
 	Model        string       `json:"model"`
@@ -46,9 +56,10 @@ type formatSpec struct {
 }
 
 func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.EvalResult, error) {
+	providerName := wire.ProviderLabel(cfg.Provider, provider.Anthropic)
 	apiKey := strings.TrimSpace(cfg.APIKey)
 	if apiKey == "" {
-		return wire.EvalResult{}, provider.ProviderAPIKeyRequiredError(provider.Anthropic)
+		return wire.EvalResult{}, provider.ProviderAPIKeyRequiredError(providerName)
 	}
 	model := strings.TrimSpace(cfg.Model)
 	if model == "" {
@@ -87,7 +98,7 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		},
 	})
 	if err != nil {
-		return wire.EvalResult{}, wire.MarshalRequestError(provider.Anthropic, err)
+		return wire.EvalResult{}, wire.MarshalRequestErrorForWire(providerName, wireName, err)
 	}
 
 	var resp wire.HTTPResponse
@@ -97,10 +108,10 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		wire.HeaderContentType:      wire.ContentTypeJSON,
 	}, body, wire.HTTPOptions{Retry: cfg.Retry, MaxBodyBytes: cfg.MaxResponseBody})
 	if err != nil {
-		return wire.EvalResult{}, wire.JudgeRequestError(provider.Anthropic, err)
+		return wire.EvalResult{}, wire.JudgeRequestErrorForWire(providerName, wireName, err)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
-		return wire.EvalResult{}, wire.StatusError(provider.Anthropic, resp)
+		return wire.EvalResult{}, wire.StatusErrorForWire(providerName, wireName, resp)
 	}
 
 	var parsed struct {
@@ -112,30 +123,31 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		} `json:"content"`
 	}
 	err = json.Unmarshal(resp.Body, &parsed)
+	requestID := wire.RequestID(resp.Header)
 	if err != nil {
-		return wire.EvalResult{}, wire.DecodeResponseWrapError(provider.Anthropic, err)
+		return wire.EvalResult{}, wire.DecodeResponseWrapErrorForWire(providerName, wireName, err, requestID)
 	}
-	if strings.EqualFold(parsed.StopReason, "refusal") {
-		return wire.EvalResult{}, wire.DecodeResponseError(provider.Anthropic, wire.ErrRefusal)
+	if strings.EqualFold(parsed.StopReason, stopReasonRefusal) {
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrRefusal, requestID)
 	}
-	if strings.EqualFold(parsed.StopReason, "max_tokens") {
-		return wire.EvalResult{}, wire.DecodeResponseError(provider.Anthropic, "output truncated by max_tokens")
+	if strings.EqualFold(parsed.StopReason, stopReasonMaxTokens) {
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrOutputTruncatedMaxTokens, requestID)
 	}
 
 	content := ""
 	for _, block := range parsed.Content {
-		if strings.EqualFold(block.Type, "text") && strings.TrimSpace(block.Text) != "" {
+		if strings.EqualFold(block.Type, contentTypeText) && strings.TrimSpace(block.Text) != "" {
 			content = block.Text
 			break
 		}
 	}
 	content = wire.StripCodeFence(content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, wire.DecodeResponseError(provider.Anthropic, "empty text content")
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrEmptyTextContent, requestID)
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, wire.DecodeResponseError(provider.Anthropic, wire.ErrInvalidJSONPayload)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrInvalidJSONPayload, requestID)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)
@@ -147,7 +159,7 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		RawJSON:   rawJSON,
 		Model:     outModel,
 		Latency:   resp.Latency,
-		RequestID: wire.RequestID(resp.Header),
+		RequestID: requestID,
 	}, nil
 }
 
@@ -156,7 +168,7 @@ func sanitizeSchema(schema any) any {
 	case map[string]any:
 		out := make(map[string]any, len(v))
 		for key, value := range v {
-			if key == "minimum" || key == "maximum" {
+			if key == schemaKeywordMinimum || key == schemaKeywordMaximum {
 				continue
 			}
 			out[key] = sanitizeSchema(value)

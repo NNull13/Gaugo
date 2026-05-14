@@ -276,6 +276,35 @@ func TestPostJSONRetriesRetryableStatus(t *testing.T) {
 	}
 }
 
+func TestPostJSONLatencyIncludesRetryBackoff(t *testing.T) {
+	t.Parallel()
+
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if atomic.AddInt32(&attempts, 1) == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte("retry"))
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	resp, err := PostJSONWithOptions(context.Background(), NewHTTPClient(nil), srv.URL, nil, nil, HTTPOptions{
+		Retry: RetryConfig{
+			MaxAttempts: 2,
+			BaseDelay:   20 * time.Millisecond,
+			MaxDelay:    20 * time.Millisecond,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PostJSONWithOptions error: %v", err)
+	}
+	if resp.Latency < 15*time.Millisecond {
+		t.Fatalf("latency should include retry backoff, got %s", resp.Latency)
+	}
+}
+
 func TestPostJSONRetriesTransientTransportErrors(t *testing.T) {
 	t.Parallel()
 

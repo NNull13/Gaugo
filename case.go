@@ -1,39 +1,10 @@
 package gaugo
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
-
-// Document is one retrieved context record for a case.
-type Document struct {
-	ID   string
-	Text string
-}
-
-// Input is the test input passed to a target system under evaluation.
-type Input struct {
-	Question string
-	Context  []Document
-}
-
-// Output is the target system answer under evaluation.
-type Output struct {
-	Answer string
-}
-
-// EvalInput is provided to metrics after a case run completes.
-type EvalInput struct {
-	CaseName string
-	Input    Input
-	Output   Output
-	Expected Expected
-}
-
-// Expected holds simple non-LLM assertions for a case.
-type Expected struct {
-	Contains []string
-}
 
 // Case defines one evaluation scenario.
 type Case struct {
@@ -60,11 +31,6 @@ func ContextDocs(docs ...Document) CaseOption {
 	}
 }
 
-// Doc is a convenience constructor for Document.
-func Doc(id, text string) Document {
-	return Document{ID: id, Text: text}
-}
-
 // ExpectedContains requires the output answer to contain the given substring.
 func ExpectedContains(substr string) CaseOption {
 	return func(c *Case) {
@@ -72,9 +38,24 @@ func ExpectedContains(substr string) CaseOption {
 	}
 }
 
+// ExpectedAnswer sets the reference answer for metrics that need ground truth.
+func ExpectedAnswer(answer string) CaseOption {
+	return func(c *Case) {
+		c.Expected.Answer = strings.TrimSpace(answer)
+	}
+}
+
+// ExpectedInstructions sets the reference instructions for
+// instruction-following metrics.
+func ExpectedInstructions(instructions string) CaseOption {
+	return func(c *Case) {
+		c.Expected.Instructions = strings.TrimSpace(instructions)
+	}
+}
+
 func validateCase(c Case) error {
 	if strings.TrimSpace(c.Name) == "" {
-		return fmt.Errorf("case name is required")
+		return errors.New("case name is required")
 	}
 	if strings.TrimSpace(c.Input.Question) == "" {
 		return fmt.Errorf("case %q input question is required", c.Name)

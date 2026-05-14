@@ -10,6 +10,8 @@ import (
 	"github.com/nnull13/gaugo/internal/provider/wire"
 )
 
+const wireName = "chat_completions"
+
 type Config struct {
 	Provider        string
 	APIKey          string
@@ -79,7 +81,7 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		},
 	})
 	if err != nil {
-		return wire.EvalResult{}, wire.MarshalRequestError(providerName, err)
+		return wire.EvalResult{}, wire.MarshalRequestErrorForWire(providerName, wireName, err)
 	}
 
 	var resp wire.HTTPResponse
@@ -88,10 +90,10 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		wire.HeaderContentType:   wire.ContentTypeJSON,
 	}, body, wire.HTTPOptions{Retry: cfg.Retry, MaxBodyBytes: cfg.MaxResponseBody})
 	if err != nil {
-		return wire.EvalResult{}, wire.JudgeRequestError(providerName, err)
+		return wire.EvalResult{}, wire.JudgeRequestErrorForWire(providerName, wireName, err)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
-		return wire.EvalResult{}, wire.StatusError(providerName, resp)
+		return wire.EvalResult{}, wire.StatusErrorForWire(providerName, wireName, resp)
 	}
 
 	var parsed struct {
@@ -105,26 +107,27 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		} `json:"choices"`
 	}
 	err = json.Unmarshal(resp.Body, &parsed)
+	requestID := wire.RequestID(resp.Header)
 	if err != nil {
-		return wire.EvalResult{}, wire.DecodeResponseWrapError(providerName, err)
+		return wire.EvalResult{}, wire.DecodeResponseWrapErrorForWire(providerName, wireName, err, requestID)
 	}
 	if len(parsed.Choices) == 0 {
-		return wire.EvalResult{}, wire.DecodeResponseError(providerName, "no choices returned")
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrNoChoicesReturned, requestID)
 	}
 	if strings.EqualFold(parsed.Choices[0].FinishReason, "length") {
-		return wire.EvalResult{}, wire.DecodeResponseError(providerName, "output truncated by token limit")
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrOutputTruncatedTokenLimit, requestID)
 	}
 	if strings.TrimSpace(parsed.Choices[0].Message.Refusal) != "" {
-		return wire.EvalResult{}, wire.DecodeResponseError(providerName, wire.ErrRefusal)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrRefusal, requestID)
 	}
 
 	content := wire.StripCodeFence(parsed.Choices[0].Message.Content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, wire.DecodeResponseError(providerName, "empty message content")
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrEmptyMessageContent, requestID)
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, wire.DecodeResponseError(providerName, wire.ErrInvalidJSONPayload)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrInvalidJSONPayload, requestID)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)
@@ -136,6 +139,6 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		RawJSON:   rawJSON,
 		Model:     outModel,
 		Latency:   resp.Latency,
-		RequestID: wire.RequestID(resp.Header),
+		RequestID: requestID,
 	}, nil
 }

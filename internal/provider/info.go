@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -65,8 +64,15 @@ const (
 	ConfigUnsupportedProviderWireMode = "unsupported mode %q"
 )
 
+const (
+	configErrorFormat          = "invalid %s config: %s"
+	configWrapErrorFormat      = "invalid %s config: %w"
+	configFieldWrapErrorFormat = "invalid %s config: %s: %w"
+	providerAPIKeyFormat       = "%s %s"
+)
+
 func ConfigError(provider, message string) error {
-	return fmt.Errorf("invalid %s config: %s", provider, message)
+	return fmt.Errorf(configErrorFormat, provider, message)
 }
 
 func ConfigErrorf(provider, format string, args ...any) error {
@@ -74,17 +80,13 @@ func ConfigErrorf(provider, format string, args ...any) error {
 }
 
 func ConfigWrapError(provider string, err error) error {
-	return fmt.Errorf("invalid %s config: %w", provider, err)
+	return fmt.Errorf(configWrapErrorFormat, provider, err)
 }
 
 func ConfigFieldWrapError(provider, field string, err error) error {
-	return fmt.Errorf("invalid %s config: %s: %w", provider, field, err)
-}
-
-func APIKeyRequiredError() error {
-	return errors.New(ConfigAPIKeyRequired)
+	return fmt.Errorf(configFieldWrapErrorFormat, provider, field, err)
 }
 
 func ProviderAPIKeyRequiredError(provider string) error {
-	return fmt.Errorf("%s %s", provider, ConfigAPIKeyRequired)
+	return fmt.Errorf(providerAPIKeyFormat, provider, ConfigAPIKeyRequired)
 }

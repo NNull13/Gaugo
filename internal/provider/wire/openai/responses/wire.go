@@ -11,7 +11,16 @@ import (
 	"github.com/nnull13/gaugo/internal/provider/wire"
 )
 
-const wireName = provider.ResponsesWireName
+const (
+	wireName                 = provider.ResponsesWireName
+	responseStatusIncomplete = "incomplete"
+	incompleteReasonUnknown  = "unknown"
+	incompleteOutputFormat   = "incomplete output reason=%q"
+	outputTypeOutputText     = "output_text"
+	outputTypeRefusal        = "refusal"
+	outputTypeText           = "text"
+	errEmptyOutputText       = "empty output text"
+)
 
 type Config struct {
 	Provider        string
@@ -83,7 +92,7 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		},
 	})
 	if err != nil {
-		return wire.EvalResult{}, wire.MarshalRequestError(wireName, err)
+		return wire.EvalResult{}, wire.MarshalRequestErrorForWire(providerName, wireName, err)
 	}
 
 	var resp wire.HTTPResponse
@@ -92,7 +101,7 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		wire.HeaderContentType:   wire.ContentTypeJSON,
 	}, body, wire.HTTPOptions{Retry: cfg.Retry, MaxBodyBytes: cfg.MaxResponseBody})
 	if err != nil {
-		return wire.EvalResult{}, wire.JudgeRequestError(wireName, err)
+		return wire.EvalResult{}, wire.JudgeRequestErrorForWire(providerName, wireName, err)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
 		return wire.EvalResult{}, wire.StatusErrorForWire(providerName, wireName, resp)
@@ -115,28 +124,33 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		} `json:"output"`
 	}
 	err = json.Unmarshal(resp.Body, &parsed)
+	requestID := wire.RequestID(resp.Header)
 	if err != nil {
-		return wire.EvalResult{}, wire.DecodeResponseWrapError(wireName, err)
+		return wire.EvalResult{}, wire.DecodeResponseWrapErrorForWire(providerName, wireName, err, requestID)
 	}
-	if strings.EqualFold(parsed.Status, "incomplete") {
+	if strings.EqualFold(parsed.Status, responseStatusIncomplete) {
 		reason := strings.TrimSpace(parsed.IncompleteDetails.Reason)
 		if reason == "" {
-			reason = "unknown"
+			reason = incompleteReasonUnknown
 		}
-		return wire.EvalResult{}, wire.DecodeResponseError(wireName, fmt.Sprintf("incomplete output reason=%q", reason))
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, fmt.Sprintf(incompleteOutputFormat, reason), requestID)
 	}
 
 	content := strings.TrimSpace(parsed.OutputText)
 	if content == "" {
-		content = extractOutputText(parsed.Output)
+		extracted, refused := extractOutputText(parsed.Output)
+		if refused {
+			return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrRefusal, requestID)
+		}
+		content = extracted
 	}
 	content = wire.StripCodeFence(content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, wire.DecodeResponseError(wireName, "empty output text")
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, errEmptyOutputText, requestID)
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, wire.DecodeResponseError(wireName, wire.ErrInvalidJSONPayload)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrInvalidJSONPayload, requestID)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)
@@ -148,7 +162,7 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		RawJSON:   rawJSON,
 		Model:     outModel,
 		Latency:   resp.Latency,
-		RequestID: wire.RequestID(resp.Header),
+		RequestID: requestID,
 	}, nil
 }
 
@@ -159,21 +173,21 @@ func extractOutputText(out []struct {
 		Type string `json:"type"`
 		Text string `json:"text"`
 	} `json:"content"`
-}) string {
+}) (string, bool) {
 	for _, item := range out {
-		if strings.TrimSpace(item.Text) != "" && strings.EqualFold(item.Type, "output_text") {
-			return item.Text
+		if strings.TrimSpace(item.Text) != "" && strings.EqualFold(item.Type, outputTypeOutputText) {
+			return item.Text, false
 		}
 		for _, c := range item.Content {
-			if strings.EqualFold(c.Type, "refusal") {
-				return ""
+			if strings.EqualFold(c.Type, outputTypeRefusal) {
+				return "", true
 			}
-			if strings.EqualFold(c.Type, "output_text") || strings.EqualFold(c.Type, "text") {
+			if strings.EqualFold(c.Type, outputTypeOutputText) || strings.EqualFold(c.Type, outputTypeText) {
 				if strings.TrimSpace(c.Text) != "" {
-					return c.Text
+					return c.Text, false
 				}
 			}
 		}
 	}
-	return ""
+	return "", false
 }

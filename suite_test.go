@@ -2,6 +2,7 @@ package gaugo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -61,6 +62,17 @@ func (m passMetric) Name() string { return m.name }
 
 func (m passMetric) Evaluate(context.Context, EvalInput, Judge) (MetricResult, error) {
 	return MetricResult{Name: m.name, Score: 1, Pass: true, Reason: "ok"}, nil
+}
+
+type inspectMetric struct {
+	name string
+	eval func(ctx context.Context, in EvalInput, j Judge) (MetricResult, error)
+}
+
+func (m inspectMetric) Name() string { return m.name }
+
+func (m inspectMetric) Evaluate(ctx context.Context, in EvalInput, j Judge) (MetricResult, error) {
+	return m.eval(ctx, in, j)
 }
 
 type errorMetric struct {
@@ -229,6 +241,84 @@ func TestExpectedContainsProducesFailureMetric(t *testing.T) {
 	}
 }
 
+func TestExpectedAnswerAndInstructionsReachMetrics(t *testing.T) {
+	t.Parallel()
+
+	r, err := NewRunner(WithParallelism(1))
+	if err != nil {
+		t.Fatalf("NewRunner error: %v", err)
+	}
+	if err := r.Case("expected-fields",
+		Question("Q?"),
+		ExpectedAnswer("  reference answer  "),
+		ExpectedInstructions("  answer tersely  "),
+	); err != nil {
+		t.Fatalf("Case error: %v", err)
+	}
+
+	result, err := r.Run(context.Background(), func(context.Context, Input) (Output, error) {
+		time.Sleep(time.Millisecond)
+		return Output{Answer: "actual answer"}, nil
+	}, inspectMetric{
+		name: "InspectExpected",
+		eval: func(_ context.Context, in EvalInput, _ Judge) (MetricResult, error) {
+			if in.Expected.Answer != "reference answer" {
+				t.Fatalf("Expected.Answer got=%q want=reference answer", in.Expected.Answer)
+			}
+			if in.Expected.Instructions != "answer tersely" {
+				t.Fatalf("Expected.Instructions got=%q want=answer tersely", in.Expected.Instructions)
+			}
+			if in.Elapsed <= 0 {
+				t.Fatalf("Elapsed got=%v want positive duration", in.Elapsed)
+			}
+			return MetricResult{Name: "InspectExpected", Score: 1, Pass: true, Reason: "ok"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if len(result.Cases) != 1 || len(result.Cases[0].Metrics) != 1 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestRunnerDeterministicJSONMetrics(t *testing.T) {
+	t.Parallel()
+
+	reporter := &captureReporter{}
+	suite := New(t, WithReporter(reporter), WithParallelism(1))
+	suite.Case("json-output",
+		Question("Return user JSON"),
+	)
+
+	schema := json.RawMessage(`{
+		"type":"object",
+		"required":["name"],
+		"properties":{"name":{"type":"string"}}
+	}`)
+	suite.Assert(context.Background(),
+		func(context.Context, Input) (Output, error) {
+			return Output{Answer: `{"name":"Ada","ok":true}`}, nil
+		},
+		JSONValidity(),
+		SchemaCompliance(WithSchema(schema)),
+		ExpectedJSON(WithExpectedFields(map[string]any{"name": "Ada"})),
+		Latency(WithMaxLatency(time.Second)),
+		AnswerLength(WithMinLength(10), WithMaxLength(64)),
+		ExpectedRegex(`"name"`),
+	)
+
+	got := reporter.result.Cases[0].Metrics
+	if len(got) != 6 {
+		t.Fatalf("metric count got=%d want=6", len(got))
+	}
+	for _, metric := range got {
+		if !metric.Pass {
+			t.Fatalf("metric %s expected pass, reason: %q", metric.Name, metric.Reason)
+		}
+	}
+}
+
 func TestRunnerRunProgrammatic(t *testing.T) {
 	t.Parallel()
 
@@ -267,6 +357,67 @@ func TestRunnerRejectsVacuousNilMetrics(t *testing.T) {
 	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "no effective metrics") {
 		t.Fatalf("expected vacuous metrics error, got %v", err)
+	}
+}
+
+func TestRunnerRejectsMixedSuiteCaseWithoutEffectiveChecks(t *testing.T) {
+	t.Parallel()
+
+	r, err := NewRunner(WithParallelism(1))
+	if err != nil {
+		t.Fatalf("NewRunner error: %v", err)
+	}
+	if err := r.Case("checked", Question("Q?"), ExpectedContains("answer")); err != nil {
+		t.Fatalf("Case error: %v", err)
+	}
+	if err := r.Case("unchecked", Question("Q?")); err != nil {
+		t.Fatalf("Case error: %v", err)
+	}
+
+	_, err = r.Run(context.Background(), func(context.Context, Input) (Output, error) {
+		return Output{Answer: "answer"}, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "unchecked") {
+		t.Fatalf("expected unchecked case error, got %v", err)
+	}
+}
+
+func TestRunnerStopsMetricLoopAfterTimeout(t *testing.T) {
+	t.Parallel()
+
+	r, err := NewRunner(WithParallelism(1), WithCaseTimeout(20*time.Millisecond))
+	if err != nil {
+		t.Fatalf("NewRunner error: %v", err)
+	}
+	if err := r.Case("metric-timeout", Question("Q?")); err != nil {
+		t.Fatalf("Case error: %v", err)
+	}
+
+	secondCalled := false
+	result, err := r.Run(context.Background(), func(context.Context, Input) (Output, error) {
+		return Output{Answer: "answer"}, nil
+	},
+		inspectMetric{name: "slow", eval: func(ctx context.Context, _ EvalInput, _ Judge) (MetricResult, error) {
+			<-ctx.Done()
+			return MetricResult{}, ctx.Err()
+		}},
+		inspectMetric{name: "second", eval: func(context.Context, EvalInput, Judge) (MetricResult, error) {
+			secondCalled = true
+			return MetricResult{Name: "second", Score: 1, Pass: true}, nil
+		}},
+	)
+	if err != nil {
+		t.Fatalf("Run error: %v", err)
+	}
+	if secondCalled {
+		t.Fatalf("second metric should not run after timeout")
+	}
+	if len(result.Cases) != 1 || len(result.Cases[0].Metrics) != 1 {
+		t.Fatalf("expected exactly one metric failure, got %+v", result)
+	}
+	got := result.Cases[0].Metrics[0]
+	if got.Name != "slow" || got.Pass || !strings.Contains(got.Reason, "context deadline exceeded") {
+		t.Fatalf("unexpected timeout metric result: %+v", got)
 	}
 }
 
@@ -838,14 +989,17 @@ func TestRunResultSummary(t *testing.T) {
 	if !strings.Contains(summary, "cases=2") {
 		t.Fatalf("summary missing cases=2: %q", summary)
 	}
-	if !strings.Contains(summary, "failed_cases=1") {
-		t.Fatalf("summary missing failed_cases=1: %q", summary)
+	if !strings.Contains(summary, "failed_cases=2") {
+		t.Fatalf("summary missing failed_cases=2: %q", summary)
 	}
-	if !strings.Contains(summary, "metrics=2") {
-		t.Fatalf("summary missing metrics=2: %q", summary)
+	if !strings.Contains(summary, "checks=2") {
+		t.Fatalf("summary missing checks=2: %q", summary)
 	}
-	if !strings.Contains(summary, "failed_metrics=1") {
-		t.Fatalf("summary missing failed_metrics=1: %q", summary)
+	if !strings.Contains(summary, "failed_checks=1") {
+		t.Fatalf("summary missing failed_checks=1: %q", summary)
+	}
+	if !strings.Contains(summary, "run_errors=1") {
+		t.Fatalf("summary missing run_errors=1: %q", summary)
 	}
 	if !strings.Contains(summary, "pass_rate=") {
 		t.Fatalf("summary missing pass_rate: %q", summary)

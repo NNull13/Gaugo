@@ -1,9 +1,7 @@
 package contextrelevancy
 
 import (
-	"fmt"
-
-	"github.com/nnull13/gaugo/internal/jsonx"
+	"github.com/nnull13/gaugo/internal/metrics"
 )
 
 const parseErrorPrefix = "parse context relevancy response"
@@ -28,29 +26,31 @@ func Parse(raw []byte) (Output, error) {
 		} `json:"documents"`
 		Reason *string `json:"reason"`
 	}
-	if err := jsonx.DecodeStrict(raw, &decoded); err != nil {
-		return Output{}, fmt.Errorf("%s: %w", parseErrorPrefix, err)
+	err := metrics.DecodeStrict(raw, &decoded, parseErrorPrefix)
+	if err != nil {
+		return Output{}, err
 	}
 	if decoded.Documents == nil {
-		return Output{}, fmt.Errorf("%s: missing required field documents", parseErrorPrefix)
+		return Output{}, metrics.MissingRequiredField(parseErrorPrefix, "documents")
 	}
 	if decoded.Reason == nil {
-		return Output{}, fmt.Errorf("%s: missing required field reason", parseErrorPrefix)
+		return Output{}, metrics.MissingRequiredField(parseErrorPrefix, "reason")
 	}
 
 	documents := make([]Document, len(*decoded.Documents))
 	for i, d := range *decoded.Documents {
 		if d.ID == nil {
-			return Output{}, fmt.Errorf("%s: document %d missing required field id", parseErrorPrefix, i)
+			return Output{}, metrics.MissingRequiredNestedField(parseErrorPrefix, "document", i, "id")
 		}
 		if d.Score == nil {
-			return Output{}, fmt.Errorf("%s: document %d missing required field score", parseErrorPrefix, i)
+			return Output{}, metrics.MissingRequiredNestedField(parseErrorPrefix, "document", i, "score")
 		}
 		if d.Reason == nil {
-			return Output{}, fmt.Errorf("%s: document %d missing required field reason", parseErrorPrefix, i)
+			return Output{}, metrics.MissingRequiredNestedField(parseErrorPrefix, "document", i, "reason")
 		}
-		if *d.Score < 0 || *d.Score > 1 {
-			return Output{}, fmt.Errorf("%s: document %d score must be in [0,1], got %f", parseErrorPrefix, i, *d.Score)
+		err = metrics.NestedRange01(parseErrorPrefix, "document", i, "score", *d.Score)
+		if err != nil {
+			return Output{}, err
 		}
 		documents[i] = Document{
 			ID:     *d.ID,

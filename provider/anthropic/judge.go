@@ -33,7 +33,8 @@ type Judge struct {
 
 // New returns a configured Anthropic judge.
 func New(cfg Config) (*Judge, error) {
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		return nil, err
 	}
 	return &Judge{cfg: cfg}, nil
@@ -43,6 +44,7 @@ func New(cfg Config) (*Judge, error) {
 func (j *Judge) EvaluateJSON(ctx context.Context, req gaugo.JudgeRequest) (gaugo.JudgeResponse, error) {
 	wireReq := request.ToEval(req)
 	res, err := messages.EvaluateJSON(ctx, messages.Config{
+		Provider:        provider.Anthropic,
 		APIKey:          j.cfg.APIKey,
 		Model:           j.cfg.Model,
 		BaseURL:         j.cfg.BaseURL,
@@ -57,10 +59,11 @@ func (j *Judge) EvaluateJSON(ctx context.Context, req gaugo.JudgeRequest) (gaugo
 		return gaugo.JudgeResponse{}, err
 	}
 	return gaugo.JudgeResponse{
-		RawJSON:  res.RawJSON,
-		Provider: provider.Anthropic,
-		Model:    res.Model,
-		Latency:  res.Latency,
+		RawJSON:   res.RawJSON,
+		Provider:  provider.Anthropic,
+		Model:     res.Model,
+		RequestID: res.RequestID,
+		Latency:   res.Latency,
 	}, nil
 }
 
@@ -69,13 +72,16 @@ func (cfg Config) Validate() error {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return provider.ConfigError(provider.Anthropic, provider.ConfigAPIKeyRequired)
 	}
-	if err := validate.CloudURL(cfg.BaseURL, cfg.AllowUnsafeURL, provider.AnthropicHost); err != nil {
+	err := validate.CloudURL(cfg.BaseURL, cfg.AllowUnsafeURL, provider.AnthropicHost)
+	if err != nil {
 		return provider.ConfigWrapError(provider.Anthropic, err)
 	}
-	if err := validate.CloudURL(cfg.EndpointURL, cfg.AllowUnsafeURL, provider.AnthropicHost); err != nil {
+	err = validate.CloudURL(cfg.EndpointURL, cfg.AllowUnsafeURL, provider.AnthropicHost)
+	if err != nil {
 		return provider.ConfigFieldWrapError(provider.Anthropic, provider.FieldEndpointURL, err)
 	}
-	if err := cfg.Retry.Validate(); err != nil {
+	err = cfg.Retry.Validate()
+	if err != nil {
 		return provider.ConfigWrapError(provider.Anthropic, err)
 	}
 	if cfg.MaxResponseBody < 0 {

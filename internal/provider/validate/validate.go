@@ -6,6 +6,22 @@ import (
 	"strings"
 )
 
+const (
+	schemeHTTP  = "http"
+	schemeHTTPS = "https"
+)
+
+const (
+	baseURLErrorUserInfoNotAllowed = "user info is not allowed"
+	baseURLErrorSchemeHTTPS        = "scheme must be https"
+	baseURLErrorNoOfficialHosts    = "no official hosts configured"
+	baseURLErrorMustBeAbsolute     = "must be absolute"
+	baseURLErrorSchemeHTTPHTTPS    = "scheme must be http or https"
+	baseURLErrorHostOneOfFormat    = "host must be one of %s"
+	baseURLErrorFormat             = "invalid base URL %q: %s"
+	baseURLWrapErrorFormat         = "invalid base URL %q: %w"
+)
+
 // BaseURL validates an optional absolute HTTP(S) base URL.
 func BaseURL(raw string) error {
 	_, _, err := parseAbsoluteHTTPURL(raw)
@@ -23,26 +39,26 @@ func CloudURL(raw string, allowUnsafeURL bool, officialHosts ...string) error {
 		return err
 	}
 	if u.User != nil {
-		return fmt.Errorf("invalid base URL %q: user info is not allowed", raw)
+		return baseURLError(raw, baseURLErrorUserInfoNotAllowed)
 	}
 	if allowUnsafeURL {
 		return nil
 	}
-	if !strings.EqualFold(u.Scheme, "https") {
-		return fmt.Errorf("invalid base URL %q: scheme must be https", raw)
+	if !strings.EqualFold(u.Scheme, schemeHTTPS) {
+		return baseURLError(raw, baseURLErrorSchemeHTTPS)
 	}
 
 	host := normalizeHost(u.Hostname())
 	allowedHosts := normalizeHosts(officialHosts)
 	if len(allowedHosts) == 0 {
-		return fmt.Errorf("invalid base URL %q: no official hosts configured", raw)
+		return baseURLError(raw, baseURLErrorNoOfficialHosts)
 	}
 	for _, allowed := range allowedHosts {
 		if host == allowed {
 			return nil
 		}
 	}
-	return fmt.Errorf("invalid base URL %q: host must be one of %s", raw, strings.Join(allowedHosts, ", "))
+	return baseURLErrorf(raw, baseURLErrorHostOneOfFormat, strings.Join(allowedHosts, ", "))
 }
 
 func parseAbsoluteHTTPURL(raw string) (string, *url.URL, error) {
@@ -52,17 +68,29 @@ func parseAbsoluteHTTPURL(raw string) (string, *url.URL, error) {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return raw, nil, fmt.Errorf("invalid base URL %q: %w", raw, err)
+		return raw, nil, baseURLWrapError(raw, err)
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return raw, nil, fmt.Errorf("invalid base URL %q: must be absolute", raw)
+		return raw, nil, baseURLError(raw, baseURLErrorMustBeAbsolute)
 	}
 	switch strings.ToLower(u.Scheme) {
-	case "http", "https":
+	case schemeHTTP, schemeHTTPS:
 		return raw, u, nil
 	default:
-		return raw, nil, fmt.Errorf("invalid base URL %q: scheme must be http or https", raw)
+		return raw, nil, baseURLError(raw, baseURLErrorSchemeHTTPHTTPS)
 	}
+}
+
+func baseURLError(raw, detail string) error {
+	return fmt.Errorf(baseURLErrorFormat, raw, detail)
+}
+
+func baseURLErrorf(raw, format string, args ...any) error {
+	return baseURLError(raw, fmt.Sprintf(format, args...))
+}
+
+func baseURLWrapError(raw string, err error) error {
+	return fmt.Errorf(baseURLWrapErrorFormat, raw, err)
 }
 
 func normalizeHost(host string) string {

@@ -65,7 +65,7 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		},
 	})
 	if err != nil {
-		return wire.EvalResult{}, wire.MarshalRequestError(wireName, err)
+		return wire.EvalResult{}, wire.MarshalRequestErrorForWire(provider.Local, wireName, err)
 	}
 
 	headers := map[string]string{
@@ -81,10 +81,10 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		MaxBodyBytes: cfg.MaxResponseBody,
 	})
 	if err != nil {
-		return wire.EvalResult{}, wire.JudgeRequestError(wireName, err)
+		return wire.EvalResult{}, wire.JudgeRequestErrorForWire(provider.Local, wireName, err)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
-		return wire.EvalResult{}, wire.StatusError(provider.Local, resp)
+		return wire.EvalResult{}, wire.StatusErrorForWire(provider.Local, wireName, resp)
 	}
 
 	var parsed struct {
@@ -94,17 +94,18 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		} `json:"message"`
 	}
 	err = json.Unmarshal(resp.Body, &parsed)
+	requestID := wire.RequestID(resp.Header)
 	if err != nil {
-		return wire.EvalResult{}, wire.DecodeResponseWrapError(wireName, err)
+		return wire.EvalResult{}, wire.DecodeResponseWrapErrorForWire(provider.Local, wireName, err, requestID)
 	}
 
 	content := wire.StripCodeFence(parsed.Message.Content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, wire.DecodeResponseError(wireName, "empty message content")
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Local, wireName, wire.ErrEmptyMessageContent, requestID)
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, wire.DecodeResponseError(wireName, wire.ErrInvalidJSONPayload)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Local, wireName, wire.ErrInvalidJSONPayload, requestID)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)
@@ -116,6 +117,6 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		RawJSON:   rawJSON,
 		Model:     outModel,
 		Latency:   resp.Latency,
-		RequestID: wire.RequestID(resp.Header),
+		RequestID: requestID,
 	}, nil
 }

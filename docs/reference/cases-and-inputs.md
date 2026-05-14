@@ -30,7 +30,9 @@ type Case struct {
 }
 
 type Expected struct {
-    Contains []string
+    Contains     []string
+    Answer       string
+    Instructions string
 }
 ```
 
@@ -75,9 +77,20 @@ if err := runner.Case("enterprise pricing",
 
 `Question(question string)` sets the user question. The value is trimmed, and an empty final question is invalid.
 
-`ContextDocs(docs ...Document)` sets retrieved context documents. Gaugo copies the slice so later changes to the caller's slice do not change the registered case.
+`ContextDocs(docs ...Document)` sets retrieved context documents. Gaugo copies the slice so later changes to the caller's slice do not change the registered case. Use the `Doc(id, text)` shorthand to build documents inline:
+
+```go
+gaugo.ContextDocs(
+    gaugo.Doc("pricing.md", "Enterprise plans are custom and require sales."),
+    gaugo.Doc("faq.md", "Contact sales for volume discounts."),
+)
+```
 
 `ExpectedContains(substr string)` adds a deterministic substring assertion. You can call it more than once on the same case. Empty or whitespace-only values are invalid.
+
+`ExpectedAnswer(answer string)` sets the ground-truth answer used by metrics such as `ContextRecall`, `AnswerCorrectness`, and `AnswerSimilarity`.
+
+`ExpectedInstructions(instructions string)` sets the instruction contract used by `InstructionAdherence`.
 
 ```go
 suite.Case("refund policy",
@@ -99,7 +112,9 @@ Gaugo validates cases at registration time.
 - Questions must be non-empty after trimming.
 - `ExpectedContains` values must be non-empty after trimming.
 - A case may omit `ContextDocs` when the system being evaluated does not use retrieval.
-- A case may omit `ExpectedContains` if you pass one or more LLM-judged metrics to `Assert` or `Run`.
+- A case may omit `ExpectedContains` if you pass one or more metrics to `Assert` or `Run`.
+- Metrics that need ground truth return a metric error when `ExpectedAnswer` is missing.
+- `InstructionAdherence` returns a metric error when `ExpectedInstructions` is missing.
 
 `Suite.Case` fails the test immediately on invalid input. `Runner.Case` returns an error.
 
