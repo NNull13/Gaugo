@@ -97,7 +97,8 @@ different things.
 | `MetricResult.Pass == false` without `MetricErrorInfo` | The case ran and the metric judged quality below threshold. | Treat it as a product quality failure. |
 
 For programmatic consumers, use `MetricErrorInfo` to separate judge/provider
-problems from low scores:
+problems from low scores. Branch on `Kind` and include `Code` in diagnostics;
+do not parse `Reason`.
 
 ```go
 for _, c := range result.Cases {
@@ -110,7 +111,8 @@ for _, c := range result.Cases {
             continue
         }
         if info, ok := gaugo.MetricErrorInfo(m); ok {
-            log.Printf("operational metric failure case=%s metric=%s kind=%s", c.Name, m.Name, info.Kind)
+            log.Printf("operational metric failure case=%s metric=%s kind=%s code=%s",
+                c.Name, m.Name, info.Kind, info.Code)
             continue
         }
         log.Printf("quality failure case=%s metric=%s score=%.3f reason=%s", c.Name, m.Name, m.Score, m.Reason)

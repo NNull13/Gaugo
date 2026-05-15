@@ -766,8 +766,7 @@ func TestRunnerRunNilContext(t *testing.T) {
 		t.Fatalf("Case error: %v", err)
 	}
 
-	//nolint:staticcheck // intentionally testing nil context fallback
-	result, err := r.Run(nil, func(_ context.Context, _ Input) (Output, error) {
+	result, err := r.Run(nilContextForTest(), func(_ context.Context, _ Input) (Output, error) {
 		return Output{Answer: "answer"}, nil
 	})
 	if err != nil {
@@ -779,6 +778,10 @@ func TestRunnerRunNilContext(t *testing.T) {
 	if result.Cases[0].RunError != nil {
 		t.Fatalf("unexpected run error: %v", result.Cases[0].RunError)
 	}
+}
+
+func nilContextForTest() context.Context {
+	return nil
 }
 
 func TestCaseTimeoutFires(t *testing.T) {
@@ -1305,27 +1308,21 @@ func TestRetryConfigValidation(t *testing.T) {
 	}
 }
 
-func TestInferErrorKindBranches(t *testing.T) {
+func TestClassifyErrorNoStringInference(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		msg  string
-		want ErrorKind
-	}{
-		{"provider response body too large", ErrorKindProviderResponse},
-		{"refusal detected", ErrorKindProviderRefusal},
-		{"output was truncated", ErrorKindProviderTruncated},
-		{"requires a configured judge", ErrorKindMetric},
-		{"threshold must be in range", ErrorKindMetric},
-		{"something random", ErrorKindUnknown},
-		{"request failed status=429 too many requests", ErrorKindUnknown},
-		{"request failed status=401 unauthorized", ErrorKindUnknown},
-		{"request failed status=500 server error", ErrorKindUnknown},
+	msgs := []string{
+		"provider response body too large",
+		"refusal detected",
+		"output was truncated",
+		"requires a configured judge",
+		"threshold must be in range",
+		"request failed status=429 too many requests",
 	}
-	for _, tt := range tests {
-		info := ClassifyError(errors.New(tt.msg))
-		if info.Kind != tt.want {
-			t.Fatalf("ClassifyError(%q).Kind got=%q want=%q", tt.msg, info.Kind, tt.want)
+	for _, msg := range msgs {
+		info := ClassifyError(errors.New(msg))
+		if info.Kind != ErrorKindUnknown {
+			t.Fatalf("ClassifyError(%q).Kind got=%q want=%q", msg, info.Kind, ErrorKindUnknown)
 		}
 	}
 }

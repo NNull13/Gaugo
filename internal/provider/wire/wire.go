@@ -14,6 +14,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/nnull13/gaugo/internal/failure"
 )
 
 const DefaultMaxResponseBody int64 = 1 << 20
@@ -47,14 +49,9 @@ const (
 )
 
 const (
-	errorKindUnknown             = "unknown"
-	errorKindProviderRequest     = "provider_request"
-	errorKindProviderAuth        = "provider_auth"
-	errorKindProviderRateLimit   = "provider_rate_limit"
-	errorKindProviderResponse    = "provider_response"
-	errorKindProviderRefusal     = "provider_refusal"
-	errorKindProviderTruncated   = "provider_truncated"
-	errorKindProviderUnavailable = "provider_unavailable"
+	ErrorKindProviderResponse  = failure.KindProviderResponse
+	ErrorKindProviderRefusal   = failure.KindProviderRefusal
+	ErrorKindProviderTruncated = failure.KindProviderTruncated
 )
 
 // Common error detail strings used by wire sub-packages.
@@ -166,12 +163,21 @@ func NormalizeRetryConfig(cfg RetryConfig) RetryConfig {
 // DecodeSchema ensures request schema is valid JSON and decodes to a generic object.
 func DecodeSchema(schema json.RawMessage) (any, error) {
 	if len(schema) == 0 {
-		return nil, errors.New(ErrJudgeRequestSchemaRequired)
+		return nil, &failure.Error{
+			Kind:    failure.KindProviderRequest,
+			Code:    failure.CodeProviderHTTPRequest,
+			Message: ErrJudgeRequestSchemaRequired,
+		}
 	}
 	var decoded any
 	err := json.Unmarshal(schema, &decoded)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", errDecodeJSONSchema, err)
+		return nil, &failure.Error{
+			Kind:    failure.KindProviderRequest,
+			Code:    failure.CodeProviderHTTPRequest,
+			Message: errDecodeJSONSchema,
+			Err:     err,
+		}
 	}
 	return decoded, nil
 }
@@ -184,132 +190,10 @@ type HTTPResponse struct {
 }
 
 // HTTPStatusError reports a non-success provider HTTP response without exposing the body.
-type HTTPStatusError struct {
-	Provider   string
-	Wire       string
-	StatusCode int
-	RequestID  string
-	BodyLen    int
-}
+type HTTPStatusError = failure.Error
 
 // OperationalError reports non-HTTP provider wire failures with structured metadata.
-type OperationalError struct {
-	Kind       string
-	Provider   string
-	Wire       string
-	StatusCode int
-	RequestID  string
-	Message    string
-	Err        error
-}
-
-func (e *OperationalError) Error() string {
-	if e == nil {
-		return ""
-	}
-	if e.Err != nil {
-		return e.Message + ": " + e.Err.Error()
-	}
-	return e.Message
-}
-
-func (e *OperationalError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Err
-}
-
-func (e *OperationalError) GaugoErrorKind() string {
-	if e == nil || strings.TrimSpace(e.Kind) == "" {
-		return errorKindUnknown
-	}
-	return strings.TrimSpace(e.Kind)
-}
-
-func (e *OperationalError) GaugoProvider() string {
-	if e == nil {
-		return ""
-	}
-	return strings.TrimSpace(e.Provider)
-}
-
-func (e *OperationalError) GaugoWire() string {
-	if e == nil {
-		return ""
-	}
-	return strings.TrimSpace(e.Wire)
-}
-
-func (e *OperationalError) GaugoStatusCode() int {
-	if e == nil {
-		return 0
-	}
-	return e.StatusCode
-}
-
-func (e *OperationalError) GaugoRequestID() string {
-	if e == nil {
-		return ""
-	}
-	return strings.TrimSpace(e.RequestID)
-}
-
-func (e *HTTPStatusError) Error() string {
-	label := strings.TrimSpace(e.Provider)
-	if wire := strings.TrimSpace(e.Wire); wire != "" {
-		if label == "" {
-			label = wire
-		} else {
-			label += "/" + wire
-		}
-	}
-	if label == "" {
-		label = defaultProviderLabel
-	}
-	return fmt.Sprintf(
-		httpStatusErrorFormat,
-		label,
-		e.StatusCode,
-		e.RequestID,
-		e.BodyLen,
-	)
-}
-
-func (e *HTTPStatusError) GaugoErrorKind() string {
-	switch {
-	case e.StatusCode == http.StatusTooManyRequests:
-		return errorKindProviderRateLimit
-	case e.StatusCode == http.StatusUnauthorized || e.StatusCode == http.StatusForbidden:
-		return errorKindProviderAuth
-	case e.StatusCode >= http.StatusBadRequest && e.StatusCode < http.StatusInternalServerError:
-		return errorKindProviderRequest
-	case e.StatusCode >= http.StatusInternalServerError:
-		return errorKindProviderUnavailable
-	default:
-		return errorKindUnknown
-	}
-}
-
-func (e *HTTPStatusError) GaugoProvider() string {
-	return strings.TrimSpace(e.Provider)
-}
-
-func (e *HTTPStatusError) GaugoWire() string {
-	return strings.TrimSpace(e.Wire)
-}
-
-func (e *HTTPStatusError) GaugoStatusCode() int {
-	return e.StatusCode
-}
-
-func (e *HTTPStatusError) GaugoRequestID() string {
-	return strings.TrimSpace(e.RequestID)
-}
-
-func (e *HTTPStatusError) GaugoBodyBytes() int {
-	return e.BodyLen
-}
+type OperationalError = failure.Error
 
 func PostJSON(ctx context.Context, client *http.Client, url string, headers map[string]string, body []byte) (HTTPResponse, error) {
 	return PostJSONWithOptions(ctx, client, url, headers, body, HTTPOptions{})
@@ -349,7 +233,12 @@ func PostJSONWithOptions(ctx context.Context, client *http.Client, url string, h
 func postJSONOnce(ctx context.Context, client *http.Client, url string, headers map[string]string, body []byte, maxBodyBytes int64) (HTTPResponse, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return HTTPResponse{}, fmt.Errorf("%s: %w", errBuildRequest, err)
+		return HTTPResponse{}, &failure.Error{
+			Kind:    failure.KindProviderRequest,
+			Code:    failure.CodeProviderHTTPRequest,
+			Message: errBuildRequest,
+			Err:     err,
+		}
 	}
 	for k, v := range headers {
 		if strings.TrimSpace(v) == "" {
@@ -366,7 +255,13 @@ func postJSONOnce(ctx context.Context, client *http.Client, url string, headers 
 	var resp *http.Response
 	resp, err = client.Do(req)
 	if err != nil {
-		return HTTPResponse{}, fmt.Errorf("%s: %w", errExecuteRequest, err)
+		return HTTPResponse{}, &failure.Error{
+			Kind:      failure.KindProviderRequest,
+			Code:      failure.CodeProviderHTTPRequest,
+			Message:   errExecuteRequest,
+			Retryable: retryableTransportError(err),
+			Err:       err,
+		}
 	}
 	defer resp.Body.Close()
 
@@ -408,7 +303,8 @@ func ProviderLabel(configured, fallback string) string {
 func MarshalRequestErrorForWire(provider, wire string, err error) error {
 	label := providerWireLabel(provider, wire)
 	return &OperationalError{
-		Kind:     errorKindProviderRequest,
+		Kind:     failure.KindProviderRequest,
+		Code:     failure.CodeProviderHTTPRequest,
 		Provider: provider,
 		Wire:     wire,
 		Message:  fmt.Sprintf("marshal %s request", label),
@@ -416,10 +312,14 @@ func MarshalRequestErrorForWire(provider, wire string, err error) error {
 	}
 }
 
-func DecodeResponseErrorForWire(provider, wireName, detail string, requestID ...string) error {
+func DecodeResponseErrorForWire(kind failure.Kind, provider, wireName, detail string, requestID ...string) error {
+	if kind == "" || kind == failure.KindUnknown {
+		kind = failure.KindProviderResponse
+	}
 	label := providerWireLabel(provider, wireName)
 	return &OperationalError{
-		Kind:      decodeErrorKind(detail),
+		Kind:      kind,
+		Code:      decodeErrorCode(kind),
 		Provider:  provider,
 		Wire:      wireName,
 		RequestID: optionalRequestID(requestID),
@@ -430,7 +330,8 @@ func DecodeResponseErrorForWire(provider, wireName, detail string, requestID ...
 func DecodeResponseWrapErrorForWire(provider, wireName string, err error, requestID ...string) error {
 	label := providerWireLabel(provider, wireName)
 	return &OperationalError{
-		Kind:      errorKindProviderResponse,
+		Kind:      failure.KindProviderResponse,
+		Code:      failure.CodeProviderResponseDecode,
 		Provider:  provider,
 		Wire:      wireName,
 		RequestID: optionalRequestID(requestID),
@@ -441,8 +342,18 @@ func DecodeResponseWrapErrorForWire(provider, wireName string, err error, reques
 
 func JudgeRequestErrorForWire(provider, wireName string, err error) error {
 	label := providerWireLabel(provider, wireName)
+	info := failure.Classify(err)
+	kind := failure.KindProviderRequest
+	code := failure.CodeProviderHTTPRequest
+	if info.Kind != "" && info.Kind != failure.KindUnknown {
+		kind = info.Kind
+	}
+	if info.Code != "" && info.Code != failure.CodeUnknown {
+		code = info.Code
+	}
 	return &OperationalError{
-		Kind:     errorKindProviderRequest,
+		Kind:     kind,
+		Code:     code,
 		Provider: provider,
 		Wire:     wireName,
 		Message:  fmt.Sprintf("%s judge request failed", label),
@@ -451,12 +362,20 @@ func JudgeRequestErrorForWire(provider, wireName string, err error) error {
 }
 
 func StatusErrorForWire(provider, wire string, resp HTTPResponse) error {
+	requestID := RequestID(resp.Header)
+	bodyBytes := len(resp.Body)
+	statusKind := failure.KindFromStatusCode(resp.StatusCode)
+	label := providerWireLabel(provider, wire)
 	return &HTTPStatusError{
+		Kind:       statusKind,
+		Code:       failure.CodeProviderHTTPStatus,
 		Provider:   provider,
 		Wire:       wire,
 		StatusCode: resp.StatusCode,
-		RequestID:  RequestID(resp.Header),
-		BodyLen:    len(resp.Body),
+		RequestID:  requestID,
+		BodyBytes:  bodyBytes,
+		Retryable:  failure.RetryableStatus(resp.StatusCode),
+		Message:    fmt.Sprintf(httpStatusErrorFormat, label, resp.StatusCode, requestID, bodyBytes),
 	}
 }
 
@@ -480,20 +399,14 @@ func providerWireLabel(provider, wireName string) string {
 	return label
 }
 
-func decodeErrorKind(detail string) string {
-	lower := strings.ToLower(detail)
-	switch {
-	case strings.Contains(lower, "refusal"),
-		strings.Contains(lower, "blocked"):
-		return errorKindProviderRefusal
-	case strings.Contains(lower, "truncated"),
-		strings.Contains(lower, "max_output_tokens"),
-		strings.Contains(lower, "max_tokens"),
-		strings.Contains(lower, "max tokens"),
-		strings.Contains(lower, "token limit"):
-		return errorKindProviderTruncated
+func decodeErrorCode(kind failure.Kind) failure.Code {
+	switch kind {
+	case failure.KindProviderRefusal:
+		return failure.CodeProviderRefusal
+	case failure.KindProviderTruncated:
+		return failure.CodeProviderTruncated
 	default:
-		return errorKindProviderResponse
+		return failure.CodeProviderResponseInvalid
 	}
 }
 
@@ -567,10 +480,21 @@ func readLimited(r io.Reader, maxBodyBytes int64) ([]byte, error) {
 	}
 	body, err := io.ReadAll(io.LimitReader(r, maxBodyBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", errReadResponseBody, err)
+		return nil, &failure.Error{
+			Kind:    failure.KindProviderResponse,
+			Code:    failure.CodeProviderResponseDecode,
+			Message: errReadResponseBody,
+			Err:     err,
+		}
 	}
 	if int64(len(body)) > maxBodyBytes {
-		return nil, fmt.Errorf("%w: limit=%d", ErrResponseBodyTooLarge, maxBodyBytes)
+		return nil, &failure.Error{
+			Kind:       failure.KindProviderResponse,
+			Code:       failure.CodeProviderResponseTooLarge,
+			Message:    fmt.Sprintf("%s: limit=%d", ErrResponseBodyTooLarge, maxBodyBytes),
+			LimitBytes: maxBodyBytes,
+			Err:        ErrResponseBodyTooLarge,
+		}
 	}
 	return body, nil
 }

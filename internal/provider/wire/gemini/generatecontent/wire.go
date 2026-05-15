@@ -122,15 +122,15 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		return wire.EvalResult{}, wire.DecodeResponseWrapErrorForWire(provider.Gemini, wireName, err, requestID)
 	}
 	if len(parsed.Candidates) == 0 || len(parsed.Candidates[0].Content.Parts) == 0 {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Gemini, wireName, errNoTextCandidatesReturned, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, provider.Gemini, wireName, errNoTextCandidatesReturned, requestID)
 	}
 	if strings.EqualFold(parsed.Candidates[0].FinishReason, finishReasonMaxTokens) {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Gemini, wireName, errOutputTruncatedMaxTokens, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderTruncated, provider.Gemini, wireName, errOutputTruncatedMaxTokens, requestID)
 	}
 	if strings.EqualFold(parsed.Candidates[0].FinishReason, finishReasonSafety) ||
 		strings.EqualFold(parsed.Candidates[0].FinishReason, finishReasonBlocklist) ||
 		strings.EqualFold(parsed.Candidates[0].FinishReason, finishReasonProhibitedContent) {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Gemini, wireName, fmt.Sprintf(blockedOutputFormat, parsed.Candidates[0].FinishReason), requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderRefusal, provider.Gemini, wireName, fmt.Sprintf(blockedOutputFormat, parsed.Candidates[0].FinishReason), requestID)
 	}
 
 	var sb strings.Builder
@@ -145,11 +145,11 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 	}
 	content := wire.StripCodeFence(sb.String())
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Gemini, wireName, wire.ErrEmptyTextContent, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, provider.Gemini, wireName, wire.ErrEmptyTextContent, requestID)
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Gemini, wireName, wire.ErrInvalidJSONPayload, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, provider.Gemini, wireName, wire.ErrInvalidJSONPayload, requestID)
 	}
 
 	outModel := strings.TrimSpace(parsed.ModelVersion)

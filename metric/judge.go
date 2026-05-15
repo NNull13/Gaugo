@@ -3,7 +3,6 @@ package metric
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 
 	"github.com/nnull13/gaugo/internal/metrics/answercorrectness"
@@ -192,7 +191,7 @@ func SummarizationQuality(opts ...Option) Metric {
 func GEval(criteria string, opts ...Option) Metric {
 	criteria = strings.TrimSpace(criteria)
 	if criteria == "" {
-		return invalidMetric{name: NameGEval, err: errors.New("g-eval metric requires non-empty criteria")}
+		return invalidMetric{name: NameGEval, err: optionErrorf("g-eval metric requires non-empty criteria")}
 	}
 	build := func(in EvalInput, name string) (JudgeRequest, error) {
 		return JudgeRequest{

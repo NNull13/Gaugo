@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,6 +19,13 @@ func TestEvaluateJSONInvalidConfig(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "invalid openai config") {
 		t.Fatalf("expected invalid config error, got: %v", err)
 	}
+	if !errors.Is(err, gaugo.ErrConfig) {
+		t.Fatalf("expected config sentinel, got: %v", err)
+	}
+	info := gaugo.ClassifyError(err)
+	if info.Kind != gaugo.ErrorKindConfig || string(info.Code) != "provider_api_key_required" || info.Provider != "openai" {
+		t.Fatalf("unexpected error info: %+v", info)
+	}
 }
 
 func TestEvaluateJSONInvalidBaseURL(t *testing.T) {
@@ -26,6 +34,29 @@ func TestEvaluateJSONInvalidBaseURL(t *testing.T) {
 	_, err := New(Config{APIKey: "k", BaseURL: "://bad"})
 	if err == nil || !strings.Contains(err.Error(), "invalid openai config") {
 		t.Fatalf("expected invalid base url error, got: %v", err)
+	}
+	info := gaugo.ClassifyError(err)
+	if info.Kind != gaugo.ErrorKindConfig || info.Provider != "openai" {
+		t.Fatalf("unexpected error info: %+v", info)
+	}
+}
+
+func TestEvaluateJSONInvalidEndpointURLRedactsUserInfo(t *testing.T) {
+	t.Parallel()
+
+	_, err := New(Config{
+		APIKey:      "k",
+		EndpointURL: "https://user:secret@api.openai.com/v1/chat/completions",
+	})
+	if err == nil {
+		t.Fatalf("expected invalid endpoint URL")
+	}
+	if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "user:secret") {
+		t.Fatalf("endpoint URL error leaked user info: %v", err)
+	}
+	info := gaugo.ClassifyError(err)
+	if info.Kind != gaugo.ErrorKindConfig || info.Provider != "openai" || info.Field != "endpoint URL" {
+		t.Fatalf("unexpected error info: %+v", info)
 	}
 }
 

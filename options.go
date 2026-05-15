@@ -1,10 +1,11 @@
 package gaugo
 
 import (
-	"errors"
 	"fmt"
 	"runtime"
 	"time"
+
+	"github.com/nnull13/gaugo/internal/failure"
 )
 
 const defaultMetricDetailsLimit = 8 * 1024
@@ -32,7 +33,7 @@ func WithJudge(j Judge) Option {
 func WithParallelism(n int) Option {
 	return func(c *config) error {
 		if n <= 0 {
-			return fmt.Errorf("parallelism must be positive, got %d", n)
+			return failure.Config(failure.CodeConfigInvalid, "WithParallelism", fmt.Sprintf("parallelism must be positive, got %d", n), nil)
 		}
 		c.parallelism = n
 		return nil
@@ -43,7 +44,7 @@ func WithParallelism(n int) Option {
 func WithCaseTimeout(d time.Duration) Option {
 	return func(c *config) error {
 		if d < 0 {
-			return fmt.Errorf("case timeout must be non-negative, got %s", d)
+			return failure.Config(failure.CodeConfigInvalid, "WithCaseTimeout", fmt.Sprintf("case timeout must be non-negative, got %s", d), nil)
 		}
 		c.caseTimeout = d
 		return nil
@@ -54,7 +55,7 @@ func WithCaseTimeout(d time.Duration) Option {
 func WithReporter(r Reporter) Option {
 	return func(c *config) error {
 		if r == nil {
-			return errors.New("reporter cannot be nil")
+			return failure.Config(failure.CodeConfigInvalid, "WithReporter", "reporter cannot be nil", nil)
 		}
 		c.reporter = r
 		return nil
@@ -66,7 +67,7 @@ func WithReporter(r Reporter) Option {
 func WithMetricDetailsLimit(bytes int) Option {
 	return func(c *config) error {
 		if bytes < 0 {
-			return fmt.Errorf("metric details limit must be non-negative, got %d", bytes)
+			return failure.Config(failure.CodeConfigInvalid, "WithMetricDetailsLimit", fmt.Sprintf("metric details limit must be non-negative, got %d", bytes), nil)
 		}
 		c.detailsMax = bytes
 		return nil

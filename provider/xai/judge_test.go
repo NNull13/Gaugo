@@ -3,6 +3,7 @@ package xai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -191,6 +192,9 @@ func TestEvaluateJSONStatusErrorClassifiesXAIProvider(t *testing.T) {
 			_, err = j.EvaluateJSON(context.Background(), sampleReq())
 			if err == nil {
 				t.Fatalf("expected error")
+			}
+			if !errors.Is(err, gaugo.ErrProviderRateLimit) {
+				t.Fatalf("expected provider rate limit sentinel, got: %v", err)
 			}
 			info := gaugo.ClassifyError(err)
 			if info.Kind != gaugo.ErrorKindProviderRateLimit || info.Provider != "xai" ||

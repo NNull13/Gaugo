@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/nnull13/gaugo/internal/failure"
 )
 
 const (
@@ -18,8 +20,6 @@ const (
 	baseURLErrorMustBeAbsolute     = "must be absolute"
 	baseURLErrorSchemeHTTPHTTPS    = "scheme must be http or https"
 	baseURLErrorHostOneOfFormat    = "host must be one of %s"
-	baseURLErrorFormat             = "invalid base URL %q: %s"
-	baseURLWrapErrorFormat         = "invalid base URL %q: %w"
 )
 
 // BaseURL validates an optional absolute HTTP(S) base URL.
@@ -82,7 +82,13 @@ func parseAbsoluteHTTPURL(raw string) (string, *url.URL, error) {
 }
 
 func baseURLError(raw, detail string) error {
-	return fmt.Errorf(baseURLErrorFormat, raw, detail)
+	return failure.Validation(
+		failure.CodeValidationInvalid,
+		"provider.validate_url",
+		"base_url",
+		failure.FormatInvalidURL(raw, detail),
+		nil,
+	)
 }
 
 func baseURLErrorf(raw, format string, args ...any) error {
@@ -90,7 +96,13 @@ func baseURLErrorf(raw, format string, args ...any) error {
 }
 
 func baseURLWrapError(raw string, err error) error {
-	return fmt.Errorf(baseURLWrapErrorFormat, raw, err)
+	return failure.Validation(
+		failure.CodeValidationInvalid,
+		"provider.validate_url",
+		"base_url",
+		failure.FormatInvalidURL(raw, err.Error()),
+		err,
+	)
 }
 
 func normalizeHost(host string) string {

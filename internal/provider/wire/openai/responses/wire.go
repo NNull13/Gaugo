@@ -133,24 +133,24 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		if reason == "" {
 			reason = incompleteReasonUnknown
 		}
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, fmt.Sprintf(incompleteOutputFormat, reason), requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderTruncated, providerName, wireName, fmt.Sprintf(incompleteOutputFormat, reason), requestID)
 	}
 
 	content := strings.TrimSpace(parsed.OutputText)
 	if content == "" {
 		extracted, refused := extractOutputText(parsed.Output)
 		if refused {
-			return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrRefusal, requestID)
+			return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderRefusal, providerName, wireName, wire.ErrRefusal, requestID)
 		}
 		content = extracted
 	}
 	content = wire.StripCodeFence(content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, errEmptyOutputText, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, providerName, wireName, errEmptyOutputText, requestID)
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrInvalidJSONPayload, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, providerName, wireName, wire.ErrInvalidJSONPayload, requestID)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)

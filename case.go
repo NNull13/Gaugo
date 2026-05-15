@@ -1,9 +1,10 @@
 package gaugo
 
 import (
-	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/nnull13/gaugo/internal/failure"
 )
 
 // Case defines one evaluation scenario.
@@ -55,14 +56,14 @@ func ExpectedInstructions(instructions string) CaseOption {
 
 func validateCase(c Case) error {
 	if strings.TrimSpace(c.Name) == "" {
-		return errors.New("case name is required")
+		return failure.Validation(failure.CodeCaseInvalid, "Case", "name", "case name is required", nil)
 	}
 	if strings.TrimSpace(c.Input.Question) == "" {
-		return fmt.Errorf("case %q input question is required", c.Name)
+		return failure.Validation(failure.CodeCaseInvalid, "Case", "question", fmt.Sprintf("case %q input question is required", c.Name), nil)
 	}
 	for i, needle := range c.Expected.Contains {
 		if strings.TrimSpace(needle) == "" {
-			return fmt.Errorf("case %q ExpectedContains[%d] must be non-empty", c.Name, i)
+			return failure.Validation(failure.CodeCaseInvalid, "ExpectedContains", "expected.contains", fmt.Sprintf("case %q ExpectedContains[%d] must be non-empty", c.Name, i), nil)
 		}
 	}
 	return nil

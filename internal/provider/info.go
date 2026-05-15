@@ -2,6 +2,8 @@ package provider
 
 import (
 	"fmt"
+
+	"github.com/nnull13/gaugo/internal/failure"
 )
 
 const (
@@ -65,14 +67,17 @@ const (
 )
 
 const (
-	configErrorFormat          = "invalid %s config: %s"
-	configWrapErrorFormat      = "invalid %s config: %w"
-	configFieldWrapErrorFormat = "invalid %s config: %s: %w"
-	providerAPIKeyFormat       = "%s %s"
+	configErrorFormat    = "invalid %s config: %s"
+	providerAPIKeyFormat = "%s %s"
 )
 
 func ConfigError(provider, message string) error {
-	return fmt.Errorf(configErrorFormat, provider, message)
+	return &failure.Error{
+		Kind:     failure.KindConfig,
+		Code:     configCode(message),
+		Provider: provider,
+		Message:  fmt.Sprintf(configErrorFormat, provider, message),
+	}
 }
 
 func ConfigErrorf(provider, format string, args ...any) error {
@@ -80,13 +85,38 @@ func ConfigErrorf(provider, format string, args ...any) error {
 }
 
 func ConfigWrapError(provider string, err error) error {
-	return fmt.Errorf(configWrapErrorFormat, provider, err)
+	return &failure.Error{
+		Kind:     failure.KindConfig,
+		Provider: provider,
+		Message:  fmt.Sprintf("invalid %s config", provider),
+		Err:      err,
+	}
 }
 
 func ConfigFieldWrapError(provider, field string, err error) error {
-	return fmt.Errorf(configFieldWrapErrorFormat, provider, field, err)
+	return &failure.Error{
+		Kind:     failure.KindConfig,
+		Provider: provider,
+		Field:    field,
+		Message:  fmt.Sprintf("invalid %s config: %s", provider, field),
+		Err:      err,
+	}
 }
 
 func ProviderAPIKeyRequiredError(provider string) error {
-	return fmt.Errorf(providerAPIKeyFormat, provider, ConfigAPIKeyRequired)
+	return &failure.Error{
+		Kind:     failure.KindConfig,
+		Code:     failure.CodeProviderAPIKeyRequired,
+		Provider: provider,
+		Message:  fmt.Sprintf(providerAPIKeyFormat, provider, ConfigAPIKeyRequired),
+	}
+}
+
+func configCode(message string) failure.Code {
+	switch message {
+	case ConfigAPIKeyRequired:
+		return failure.CodeProviderAPIKeyRequired
+	default:
+		return failure.CodeProviderConfigInvalid
+	}
 }

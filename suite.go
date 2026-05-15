@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nnull13/gaugo/internal/failure"
 	"github.com/nnull13/gaugo/internal/runner"
 )
 
@@ -49,7 +50,7 @@ type RunFunc func(ctx context.Context, in Input) (Output, error)
 func NewRunner(opts ...Option) (*Runner, error) {
 	cfg, err := applyOptions(opts)
 	if err != nil {
-		return nil, fmt.Errorf("gaugo runner config invalid: %w", err)
+		return nil, failure.Config(failure.CodeRunnerConfigInvalid, "NewRunner", "gaugo runner config invalid", err)
 	}
 	return &Runner{
 		cfg:   cfg,
@@ -77,7 +78,7 @@ func New(t testing.TB, opts ...Option) *Suite {
 // Case registers one evaluation case.
 func (r *Runner) Case(name string, opts ...CaseOption) error {
 	if r == nil {
-		return errors.New("runner is nil")
+		return failure.Validation(failure.CodeValidationInvalid, "Runner.Case", "runner", "runner is nil", nil)
 	}
 
 	c := Case{Name: strings.TrimSpace(name)}
@@ -96,7 +97,7 @@ func (r *Runner) Case(name string, opts ...CaseOption) error {
 	defer r.mu.Unlock()
 
 	if _, exists := r.names[c.Name]; exists {
-		return fmt.Errorf("case %q already registered", c.Name)
+		return failure.Validation(failure.CodeCaseInvalid, "Runner.Case", "name", fmt.Sprintf("case %q already registered", c.Name), nil)
 	}
 	r.names[c.Name] = struct{}{}
 	r.cases = append(r.cases, c)
@@ -115,7 +116,7 @@ func (s *Suite) Case(name string, opts ...CaseOption) {
 // Run executes all registered cases.
 func (r *Runner) Run(ctx context.Context, run RunFunc, metrics ...Metric) (RunResult, error) {
 	if r == nil || run == nil {
-		return RunResult{}, errors.New("runner or run function is nil")
+		return RunResult{}, failure.Validation(failure.CodeValidationInvalid, "Runner.Run", "runner", "runner or run function is nil", nil)
 	}
 
 	if ctx == nil {
@@ -127,7 +128,7 @@ func (r *Runner) Run(ctx context.Context, run RunFunc, metrics ...Metric) (RunRe
 	r.mu.Unlock()
 
 	if len(cases) == 0 {
-		return RunResult{}, errors.New("no cases registered")
+		return RunResult{}, failure.Validation(failure.CodeValidationInvalid, "Runner.Run", "cases", "no cases registered", nil)
 	}
 
 	metrics = compactMetrics(metrics)
@@ -280,7 +281,13 @@ func validateEffectiveChecks(cases []Case, metrics []Metric) error {
 	if len(withoutChecks) == 0 {
 		return nil
 	}
-	return fmt.Errorf("no effective metrics for cases %q: provide global metrics or ExpectedContains for every case", withoutChecks)
+	return failure.Validation(
+		failure.CodeValidationInvalid,
+		"Runner.Run",
+		"metrics",
+		fmt.Sprintf("no effective metrics for cases %q: provide global metrics or ExpectedContains for every case", withoutChecks),
+		nil,
+	)
 }
 
 func metricErrorCanceled(ctx context.Context, err error) bool {
@@ -390,7 +397,11 @@ func (e *panicError) Error() string {
 }
 
 func (e *panicError) GaugoErrorKind() string {
-	return string(ErrorKindPanic)
+	return string(failure.KindPanic)
+}
+
+func (e *panicError) GaugoErrorCode() string {
+	return string(failure.CodePanic)
 }
 
 func newPanicError(component string, recovered any) error {

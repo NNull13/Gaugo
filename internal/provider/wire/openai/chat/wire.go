@@ -112,22 +112,22 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		return wire.EvalResult{}, wire.DecodeResponseWrapErrorForWire(providerName, wireName, err, requestID)
 	}
 	if len(parsed.Choices) == 0 {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrNoChoicesReturned, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, providerName, wireName, wire.ErrNoChoicesReturned, requestID)
 	}
 	if strings.EqualFold(parsed.Choices[0].FinishReason, "length") {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrOutputTruncatedTokenLimit, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderTruncated, providerName, wireName, wire.ErrOutputTruncatedTokenLimit, requestID)
 	}
 	if strings.TrimSpace(parsed.Choices[0].Message.Refusal) != "" {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrRefusal, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderRefusal, providerName, wireName, wire.ErrRefusal, requestID)
 	}
 
 	content := wire.StripCodeFence(parsed.Choices[0].Message.Content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrEmptyMessageContent, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, providerName, wireName, wire.ErrEmptyMessageContent, requestID)
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrInvalidJSONPayload, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, providerName, wireName, wire.ErrInvalidJSONPayload, requestID)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)

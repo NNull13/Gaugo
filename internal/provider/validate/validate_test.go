@@ -1,6 +1,9 @@
 package validate
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBaseURL(t *testing.T) {
 	t.Parallel()
@@ -29,6 +32,28 @@ func TestBaseURL(t *testing.T) {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
+	}
+}
+
+func TestCloudURLRedactsUserInfo(t *testing.T) {
+	t.Parallel()
+
+	err := CloudURL("https://user:secret@api.openai.com/v1", false, "api.openai.com")
+	if err == nil {
+		t.Fatalf("expected userinfo error")
+	}
+	if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "user:secret") {
+		t.Fatalf("URL validation error leaked user info: %v", err)
+	}
+	if !strings.Contains(err.Error(), "redacted") {
+		t.Fatalf("expected redacted URL marker, got: %v", err)
+	}
+	if metadata, ok := err.(interface {
+		GaugoErrorKind() string
+		GaugoErrorCode() string
+		GaugoField() string
+	}); !ok || metadata.GaugoErrorKind() != "validation" || metadata.GaugoField() != "base_url" {
+		t.Fatalf("unexpected validation metadata: %T %v", err, err)
 	}
 }
 

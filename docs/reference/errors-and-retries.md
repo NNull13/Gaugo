@@ -6,6 +6,51 @@ Use this reference when debugging failures, configuring retry behavior, or decid
 
 For symptom-based debugging, see [Troubleshooting](../troubleshooting.md). For provider setup, see [Provider](../provider/index.md).
 
+## Structured errors
+
+Gaugo errors are meant to be inspected structurally. Do not parse error
+strings. Use `errors.Is` or `ErrorInfo.Kind` for branching, and use `Code` as
+fine-grained diagnostic metadata when you log or route failures.
+
+```go
+if errors.Is(err, gaugo.ErrProviderRateLimit) {
+    // back off, mark infra as flaky, or retry later
+}
+
+info := gaugo.ClassifyError(err)
+log.Printf("kind=%s code=%s provider=%s status=%d request_id=%s",
+    info.Kind, info.Code, info.Provider, info.StatusCode, info.RequestID)
+```
+
+`ErrorInfo` includes `Kind`, `Code`, `Operation`, `Field`, `Provider`, `Wire`,
+`Model`, `StatusCode`, `RequestID`, `BodyBytes`, `LimitBytes`, and `Retryable`
+when available. Bundled Gaugo errors also support `errors.As`:
+
+```go
+var e *gaugo.Error
+if errors.As(err, &e) {
+    fmt.Println(e.Kind, e.Code, e.Retryable)
+}
+```
+
+Custom judges and metrics can integrate without depending on Gaugo internals by
+returning errors that implement any of these methods:
+
+```go
+GaugoErrorKind() string
+GaugoErrorCode() string
+GaugoOperation() string
+GaugoField() string
+GaugoProvider() string
+GaugoWire() string
+GaugoModel() string
+GaugoStatusCode() int
+GaugoRequestID() string
+GaugoBodyBytes() int
+GaugoLimitBytes() int64
+GaugoRetryable() bool
+```
+
 ## Configuration errors
 
 Configuration errors are returned early.

@@ -33,11 +33,11 @@ func TestClassifyErrorFromDuckTypedProviderError(t *testing.T) {
 func TestClassifyErrorContext(t *testing.T) {
 	t.Parallel()
 
-	if got := ClassifyError(context.Canceled).Kind; got != ErrorKindContextCanceled {
-		t.Fatalf("canceled kind got=%q", got)
+	if info := ClassifyError(context.Canceled); info.Kind != ErrorKindContextCanceled || string(info.Code) != "context_canceled" {
+		t.Fatalf("canceled info got=%+v", info)
 	}
-	if got := ClassifyError(context.DeadlineExceeded).Kind; got != ErrorKindContextDeadline {
-		t.Fatalf("deadline kind got=%q", got)
+	if info := ClassifyError(context.DeadlineExceeded); info.Kind != ErrorKindContextDeadline || string(info.Code) != "context_deadline" {
+		t.Fatalf("deadline info got=%+v", info)
 	}
 }
 
@@ -58,12 +58,12 @@ func TestMetricErrorInfo(t *testing.T) {
 	}
 }
 
-func TestClassifyErrorInferMetricParse(t *testing.T) {
+func TestClassifyErrorDoesNotInferFromStrings(t *testing.T) {
 	t.Parallel()
 
 	info := ClassifyError(errors.New("answer relevancy parse failed: score must be in [0,1]"))
-	if info.Kind != ErrorKindMetricParse {
-		t.Fatalf("kind got=%q want=%q", info.Kind, ErrorKindMetricParse)
+	if info.Kind != ErrorKindUnknown {
+		t.Fatalf("kind got=%q want=%q", info.Kind, ErrorKindUnknown)
 	}
 }
 
@@ -100,10 +100,77 @@ func TestClassifyErrorFromStructuredMetricErrors(t *testing.T) {
 		if tt.err == nil {
 			t.Fatalf("%s setup did not produce an error", tt.name)
 		}
+		if !errors.Is(tt.err, sentinelForKind(tt.want)) {
+			t.Fatalf("%s errors.Is did not match %q for %v", tt.name, tt.want, tt.err)
+		}
 		info := ClassifyError(tt.err)
 		if info.Kind != tt.want {
 			t.Fatalf("%s kind got=%q want=%q", tt.name, info.Kind, tt.want)
 		}
+	}
+}
+
+func TestTypedErrorSupportsErrorsIsAndAs(t *testing.T) {
+	t.Parallel()
+
+	err := fmt.Errorf("outer: %w", &Error{
+		Kind:       ErrorKindProviderRateLimit,
+		Code:       ErrorCode("provider_http_status"),
+		Provider:   "openai",
+		StatusCode: 429,
+		Message:    "openai request failed",
+	})
+	if !errors.Is(err, ErrProviderRateLimit) {
+		t.Fatalf("expected errors.Is provider rate limit")
+	}
+	var typed *Error
+	if !errors.As(err, &typed) {
+		t.Fatalf("expected errors.As *gaugo.Error")
+	}
+	info := typed.Info()
+	if info.Kind != ErrorKindProviderRateLimit || string(info.Code) != "provider_http_status" || info.Provider != "openai" {
+		t.Fatalf("unexpected typed info: %+v", info)
+	}
+}
+
+func TestErrorSentinelsClassifyByKind(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		err  error
+		want ErrorKind
+	}{
+		{ErrConfig, ErrorKindConfig},
+		{ErrValidation, ErrorKindValidation},
+		{ErrMetric, ErrorKindMetric},
+		{ErrMetricParse, ErrorKindMetricParse},
+		{ErrProviderRequest, ErrorKindProviderRequest},
+		{ErrProviderAuth, ErrorKindProviderAuth},
+		{ErrProviderRateLimit, ErrorKindProviderRateLimit},
+		{ErrProviderUnavailable, ErrorKindProviderUnavailable},
+		{ErrProviderResponse, ErrorKindProviderResponse},
+		{ErrProviderRefusal, ErrorKindProviderRefusal},
+		{ErrProviderTruncated, ErrorKindProviderTruncated},
+		{ErrPanic, ErrorKindPanic},
+	}
+	for _, tt := range tests {
+		info := ClassifyError(tt.err)
+		if info.Kind != tt.want {
+			t.Fatalf("ClassifyError(%v).Kind got=%q want=%q", tt.err, info.Kind, tt.want)
+		}
+	}
+}
+
+func sentinelForKind(kind ErrorKind) error {
+	switch kind {
+	case ErrorKindMetric:
+		return ErrMetric
+	case ErrorKindMetricParse:
+		return ErrMetricParse
+	case ErrorKindProviderRateLimit:
+		return ErrProviderRateLimit
+	default:
+		return ErrValidation
 	}
 }
 

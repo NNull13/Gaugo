@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/nnull13/gaugo"
+	"github.com/nnull13/gaugo/internal/failure"
 	"github.com/nnull13/gaugo/internal/provider"
 	"github.com/nnull13/gaugo/internal/provider/request"
 	"github.com/nnull13/gaugo/internal/provider/validate"
@@ -220,7 +221,13 @@ func normalizeMode(m Mode) (Mode, error) {
 	case string(ModeNative):
 		return ModeNative, nil
 	default:
-		return "", fmt.Errorf(provider.ConfigUnsupportedProviderWireMode, m)
+		return "", failure.Validation(
+			failure.CodeProviderConfigInvalid,
+			"local.normalize_mode",
+			"mode",
+			fmt.Sprintf(provider.ConfigUnsupportedProviderWireMode, m),
+			nil,
+		)
 	}
 }
 

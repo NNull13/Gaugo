@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/nnull13/gaugo/internal/failure"
 )
 
 // Canonical names for deterministic (non-judge) metrics.
@@ -118,7 +120,7 @@ func ExpectedRegex(pattern string, opts ...Option) Metric {
 	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return invalidMetric{name: NameExpectedRegex, err: wrapError(kindMetric, "expected regex pattern invalid", err)}
+		return invalidMetric{name: NameExpectedRegex, err: failure.Metric(failure.CodeMetricInvalid, "expected regex pattern invalid", err)}
 	}
 	return expectedRegexMetric{pattern: pattern, re: re, cfg: cfg}
 }

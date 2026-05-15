@@ -101,11 +101,11 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 
 	content := wire.StripCodeFence(parsed.Message.Content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Local, wireName, wire.ErrEmptyMessageContent, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, provider.Local, wireName, wire.ErrEmptyMessageContent, requestID)
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(provider.Local, wireName, wire.ErrInvalidJSONPayload, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, provider.Local, wireName, wire.ErrInvalidJSONPayload, requestID)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)

@@ -58,7 +58,7 @@ func TestStatusErrorRedacted(t *testing.T) {
 	if !errors.As(err, &statusErr) {
 		t.Fatalf("expected HTTPStatusError, got %T", err)
 	}
-	if statusErr.StatusCode != 400 || statusErr.RequestID != "req_123" || statusErr.BodyLen == 0 {
+	if statusErr.StatusCode != 400 || statusErr.RequestID != "req_123" || statusErr.BodyBytes == 0 {
 		t.Fatalf("unexpected status error: %+v", statusErr)
 	}
 }
@@ -244,6 +244,18 @@ func TestPostJSONBodyTooLarge(t *testing.T) {
 	})
 	if !errors.Is(err, ErrResponseBodyTooLarge) {
 		t.Fatalf("expected body-too-large error, got %v", err)
+	}
+	var metadata interface {
+		GaugoErrorKind() string
+		GaugoErrorCode() string
+		GaugoLimitBytes() int64
+	}
+	if !errors.As(err, &metadata) {
+		t.Fatalf("expected typed body-too-large metadata, got %T", err)
+	}
+	if metadata.GaugoErrorKind() != "provider_response" || metadata.GaugoErrorCode() != "provider_response_too_large" || metadata.GaugoLimitBytes() != 2 {
+		t.Fatalf("unexpected body-too-large metadata kind=%q code=%q limit=%d",
+			metadata.GaugoErrorKind(), metadata.GaugoErrorCode(), metadata.GaugoLimitBytes())
 	}
 }
 

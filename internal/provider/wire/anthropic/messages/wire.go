@@ -128,10 +128,10 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		return wire.EvalResult{}, wire.DecodeResponseWrapErrorForWire(providerName, wireName, err, requestID)
 	}
 	if strings.EqualFold(parsed.StopReason, stopReasonRefusal) {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrRefusal, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderRefusal, providerName, wireName, wire.ErrRefusal, requestID)
 	}
 	if strings.EqualFold(parsed.StopReason, stopReasonMaxTokens) {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrOutputTruncatedMaxTokens, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderTruncated, providerName, wireName, wire.ErrOutputTruncatedMaxTokens, requestID)
 	}
 
 	content := ""
@@ -143,11 +143,11 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 	}
 	content = wire.StripCodeFence(content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrEmptyTextContent, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, providerName, wireName, wire.ErrEmptyTextContent, requestID)
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(providerName, wireName, wire.ErrInvalidJSONPayload, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, providerName, wireName, wire.ErrInvalidJSONPayload, requestID)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)
