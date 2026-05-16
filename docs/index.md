@@ -59,7 +59,8 @@ Start with the [metrics overview](metrics/index.md) for the full catalog.
 | Anthropic | [provider/anthropic.md](provider/anthropic.md) |
 | Gemini | [provider/gemini.md](provider/gemini.md) |
 | xAI | [provider/xai.md](provider/xai.md) |
-| Local | [provider/local.md](provider/local.md) |
+| NVIDIA NIM | [provider/nvidia.md](provider/nvidia.md) |
+| Custom | [provider/custom.md](provider/custom.md) |
 
 Start with the [provider overview](provider/index.md) if you are not sure
 which adapter to use.

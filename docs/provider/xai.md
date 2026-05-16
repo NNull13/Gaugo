@@ -35,6 +35,7 @@ judge, err := xai.New(xai.Config{
     UseChatCompletions: false,
     HTTPClient:         &http.Client{Timeout: 30 * time.Second},
     Retry:              gaugo.DefaultRetryConfig(),
+    RateLimit:          gaugo.RateLimitConfig{},
     MaxResponseBody:    1 << 20,
 })
 if err != nil {
@@ -110,6 +111,20 @@ if err != nil {
 ```
 
 Retries apply to transient `429`/`5xx` responses and transient transport failures.
+
+## Rate limiting example
+
+```go
+judge, err := xai.New(xai.Config{
+    APIKey: os.Getenv("XAI_API_KEY"),
+    RateLimit: gaugo.RateLimitConfig{
+        RequestsPerMinute: 60,
+    },
+})
+if err != nil {
+    return err
+}
+```
 
 ## Common errors
 

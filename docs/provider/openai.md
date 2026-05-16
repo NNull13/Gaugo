@@ -34,6 +34,7 @@ judge, err := openai.New(openai.Config{
     AllowUnsafeURL:  false,
     HTTPClient:      &http.Client{Timeout: 30 * time.Second},
     Retry:           gaugo.DefaultRetryConfig(),
+    RateLimit:       gaugo.RateLimitConfig{},
     MaxResponseBody: 1 << 20,
 })
 if err != nil {
@@ -98,6 +99,24 @@ if err != nil {
 ```
 
 Retries apply to transient `429`/`5xx` responses and transient transport failures.
+
+## Rate limiting example
+
+Use `RateLimit` to prevent `429` errors when running large parallel suites.
+
+```go
+judge, err := openai.New(openai.Config{
+    APIKey: os.Getenv("OPENAI_API_KEY"),
+    RateLimit: gaugo.RateLimitConfig{
+        RequestsPerMinute: 60,
+    },
+})
+if err != nil {
+    return err
+}
+```
+
+The limiter is shared across all goroutines using this judge instance, so the limit applies per API key.
 
 ## Common errors
 

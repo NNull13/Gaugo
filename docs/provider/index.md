@@ -14,7 +14,8 @@ If you do not need an LLM judge, start with [Deterministic Checks](../examples/d
 | Anthropic | `provider/anthropic` | `claude-sonnet-4-5` | required | Messages API structured output |
 | Gemini | `provider/gemini` | `gemini-2.5-flash` | required | GenerateContent with JSON schema |
 | xAI | `provider/xai` | `grok-4.3` | required | Responses API by default, Chat Completions optional |
-| Local | `provider/local` | `llama3.1` | optional | Ollama native, OpenAI-compatible, or Anthropic-compatible local modes |
+| NVIDIA NIM | `provider/nvidia` | `meta/llama-3.3-70b-instruct` | required | OpenAI-compatible; free API key at build.nvidia.com; 40 RPM free tier |
+| Custom | `provider/custom` | `llama3.1` | optional | Ollama native, OpenAI-compatible, or Anthropic-compatible; local or remote |
 
 ## Basic pattern
 
@@ -59,7 +60,8 @@ See [Configuration](../reference/configuration.md) for shared behavior.
 - Choose Anthropic when your stack already uses Anthropic or you want Claude-based judgments.
 - Choose Gemini when you use Google AI infrastructure or want Gemini structured output.
 - Choose xAI when your evaluation policy standardizes on Grok models.
-- Choose Local for local development, offline tests, LM Studio, Ollama, or private model experiments.
+- Choose NVIDIA NIM when you want a free hosted judge with no credit card — get an API key at build.nvidia.com.
+- Choose Custom for local development, offline tests, LM Studio, Ollama, private model experiments, or any remote OpenAI/Anthropic-compatible endpoint.
 
 ## Provider pages
 
@@ -67,4 +69,5 @@ See [Configuration](../reference/configuration.md) for shared behavior.
 - [Anthropic](anthropic.md)
 - [Gemini](gemini.md)
 - [xAI](xai.md)
-- [Local](local.md)
+- [NVIDIA NIM](nvidia.md)
+- [Custom](custom.md)

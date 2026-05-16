@@ -264,8 +264,8 @@ func AnswerCorrectnessInstructions() string {
 	return "You are a strict answer correctness evaluator.\n" +
 		"Compare the actual output against the expected answer as ground truth.\n" +
 		"Use reference context only to resolve ambiguity; do not reward claims that contradict the expected answer.\n" +
-		"Break the actual output into important factual statements and mark each correct=true only when it is entailed by or equivalent to the expected answer.\n" +
-		"Penalize contradictions, omissions that change the answer, invented details, and materially different wording.\n" +
+		"Break the actual output into important factual statements and mark each correct=true when it is supported by, entailed by, or consistent with the expected answer.\n" +
+		"Penalize contradictions, omissions that change the answer, and invented details not grounded in the expected answer.\n" +
 		"Score may be any decimal in [0,1] and should reflect factual agreement with the expected answer.\n" +
 		jsonOnlyLine
 }
@@ -428,8 +428,9 @@ func ConcisenessSchema() json.RawMessage {
 }
 
 func CompletenessInstructions() string {
-	return "You are a strict completeness evaluator.\n" +
-		"Evaluate whether the actual output covers all important aspects needed to answer the user input.\n" +
+	return "You are a precise completeness evaluator.\n" +
+		"Evaluate whether the actual output covers the important aspects needed to answer the user input.\n" +
+		"Flag an aspect as missing only if its omission meaningfully reduces the answer's usefulness to the user.\n" +
 		"Use reference context only to clarify what information was available.\n" +
 		"Score may be any decimal in [0,1]. Reward answers that address the full request without material omissions.\n" +
 		"Use missing for important aspects that should have been covered; leave missing empty for a complete answer.\n" +

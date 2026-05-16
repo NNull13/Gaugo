@@ -11,7 +11,8 @@ const (
 	Anthropic = "anthropic"
 	Gemini    = "gemini"
 	XAI       = "xai"
-	Local     = "local"
+	NVIDIA    = "nvidia"
+	Custom    = "custom"
 )
 
 const (
@@ -19,6 +20,7 @@ const (
 	AnthropicHost = "api.anthropic.com"
 	GeminiHost    = "generativelanguage.googleapis.com"
 	XAIHost       = "api.x.ai"
+	NVIDIAHost    = "integrate.api.nvidia.com"
 )
 
 const (
@@ -26,7 +28,8 @@ const (
 	AnthropicBaseURL = "https://api.anthropic.com"
 	GeminiBaseURL    = "https://generativelanguage.googleapis.com"
 	XAIBaseURL       = "https://api.x.ai/v1"
-	LocalBaseURL     = "http://127.0.0.1:11434"
+	NVIDIABaseURL    = "https://integrate.api.nvidia.com/v1"
+	CustomBaseURL    = "http://127.0.0.1:11434"
 )
 
 const (
@@ -42,11 +45,12 @@ const (
 	AnthropicDefaultModel = "claude-sonnet-4-5"
 	GeminiDefaultModel    = "gemini-2.5-flash"
 	XAIDefaultModel       = "grok-4.3"
-	LocalDefaultModel     = "llama3.1"
+	NVIDIADefaultModel    = "meta/llama-3.3-70b-instruct"
+	CustomDefaultModel    = "llama3.1"
 )
 
 const (
-	LocalAPIKey = Local
+	CustomAPIKey = Custom
 
 	AnthropicDefaultAPIVersion = "2023-06-01"
 	AnthropicDefaultMaxTokens  = 1024

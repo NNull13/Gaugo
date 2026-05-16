@@ -10,6 +10,7 @@ import (
 	"github.com/nnull13/gaugo/internal/provider/request"
 	"github.com/nnull13/gaugo/internal/provider/validate"
 	"github.com/nnull13/gaugo/internal/provider/wire/gemini/generatecontent"
+	"github.com/nnull13/gaugo/internal/ratelimit"
 )
 
 // Config configures a Gemini GenerateContent judge.
@@ -21,12 +22,14 @@ type Config struct {
 	AllowUnsafeURL  bool
 	HTTPClient      *http.Client
 	Retry           gaugo.RetryConfig
+	RateLimit       gaugo.RateLimitConfig
 	MaxResponseBody int64
 }
 
 // Judge evaluates metric prompts with Gemini.
 type Judge struct {
-	cfg Config
+	cfg     Config
+	limiter *ratelimit.Limiter
 }
 
 // New returns a configured Gemini judge.
@@ -35,11 +38,20 @@ func New(cfg Config) (*Judge, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Judge{cfg: cfg}, nil
+	j := &Judge{cfg: cfg}
+	if cfg.RateLimit.RequestsPerMinute > 0 {
+		j.limiter = ratelimit.New(cfg.RateLimit.RequestsPerMinute, cfg.RateLimit.Burst)
+	}
+	return j, nil
 }
 
 // EvaluateJSON evaluates one structured metric request.
 func (j *Judge) EvaluateJSON(ctx context.Context, req gaugo.JudgeRequest) (gaugo.JudgeResponse, error) {
+	if j.limiter != nil {
+		if err := j.limiter.Wait(ctx); err != nil {
+			return gaugo.JudgeResponse{}, err
+		}
+	}
 	wireReq := request.ToEval(req)
 	res, err := generatecontent.EvaluateJSON(ctx, generatecontent.Config{
 		APIKey:          j.cfg.APIKey,
@@ -76,6 +88,10 @@ func (cfg Config) Validate() error {
 		return provider.ConfigFieldWrapError(provider.Gemini, provider.FieldEndpointURL, err)
 	}
 	err = cfg.Retry.Validate()
+	if err != nil {
+		return provider.ConfigWrapError(provider.Gemini, err)
+	}
+	err = cfg.RateLimit.Validate()
 	if err != nil {
 		return provider.ConfigWrapError(provider.Gemini, err)
 	}

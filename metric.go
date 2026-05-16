@@ -19,6 +19,7 @@ type (
 	Output        = metric.Output
 	Expected      = metric.Expected
 	Document      = metric.Document
+	FuncJudge     = metric.FuncJudge
 )
 
 // Doc is a convenience constructor for Document.

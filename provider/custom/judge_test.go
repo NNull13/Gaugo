@@ -1,4 +1,4 @@
-package local
+package custom
 
 import (
 	"context"
@@ -34,7 +34,7 @@ func TestModeNative(t *testing.T) {
 	if got, want := strings.TrimSpace(string(res.RawJSON)), `{"mode":"native"}`; got != want {
 		t.Fatalf("raw json got=%q want=%q", got, want)
 	}
-	if got, want := res.Provider, "local"; got != want {
+	if got, want := res.Provider, "custom"; got != want {
 		t.Fatalf("provider got=%q want=%q", got, want)
 	}
 }
@@ -220,7 +220,7 @@ func TestInvalidMode(t *testing.T) {
 	t.Parallel()
 
 	_, err := New(Config{Mode: Mode("invalid")})
-	if err == nil || !strings.Contains(err.Error(), "invalid local config") {
+	if err == nil || !strings.Contains(err.Error(), "invalid custom config") {
 		t.Fatalf("expected invalid config error, got: %v", err)
 	}
 }
@@ -232,7 +232,7 @@ func TestInvalidOpenAIEndpoint(t *testing.T) {
 		Mode:                 ModeOpenAI,
 		OpenAICompatEndpoint: OpenAIEndpoint("bad"),
 	})
-	if err == nil || !strings.Contains(err.Error(), "invalid local config") {
+	if err == nil || !strings.Contains(err.Error(), "invalid custom config") {
 		t.Fatalf("expected invalid config error, got: %v", err)
 	}
 }
@@ -244,7 +244,7 @@ func TestOpenAIEndpointRequiresModeOpenAI(t *testing.T) {
 		Mode:                 ModeNative,
 		OpenAICompatEndpoint: OpenAIEndpointResponses,
 	})
-	if err == nil || !strings.Contains(err.Error(), "invalid local config") {
+	if err == nil || !strings.Contains(err.Error(), "invalid custom config") {
 		t.Fatalf("expected invalid config error, got: %v", err)
 	}
 }
@@ -256,7 +256,7 @@ func TestInvalidBaseURL(t *testing.T) {
 		Mode:    ModeNative,
 		BaseURL: "://bad",
 	})
-	if err == nil || !strings.Contains(err.Error(), "invalid local config") {
+	if err == nil || !strings.Contains(err.Error(), "invalid custom config") {
 		t.Fatalf("expected invalid config error, got: %v", err)
 	}
 }

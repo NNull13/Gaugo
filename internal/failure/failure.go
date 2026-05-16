@@ -42,6 +42,7 @@ const (
 	CodeContextDeadline          Code = "context_deadline"
 	CodeCaseInvalid              Code = "case_invalid"
 	CodeRetryInvalid             Code = "retry_invalid"
+	CodeRateLimitInvalid         Code = "rate_limit_invalid"
 	CodeMetricInvalid            Code = "metric_invalid"
 	CodeMetricParse              Code = "metric_parse"
 	CodeProviderConfigInvalid    Code = "provider_config_invalid"

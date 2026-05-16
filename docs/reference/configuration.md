@@ -144,6 +144,34 @@ gaugo.DefaultRetryConfig()
 
 Zero values use defaults. Negative values are invalid. Providers retry transient HTTP statuses (`429`, `5xx`) and transient transport errors (for example timeout, EOF, and connection reset). `Retry-After` is honored and capped by `MaxDelay`.
 
+## RateLimitConfig
+
+Bundled providers accept `gaugo.RateLimitConfig` to throttle outgoing judge requests before they reach the provider.
+
+```go
+type RateLimitConfig struct {
+    RequestsPerMinute int
+    Burst             int
+}
+```
+
+`RequestsPerMinute` is the maximum number of requests per minute. Zero disables rate limiting (default: no limit).
+
+`Burst` is the maximum number of tokens that can accumulate. Zero defaults to `1`, meaning only one request is allowed before throttling begins. Set a higher value to allow an initial burst before the steady-state rate takes effect.
+
+The limiter is shared across all goroutines that use the same judge instance, so it enforces a limit per API key rather than per goroutine.
+
+```go
+judge, err := openai.New(openai.Config{
+    APIKey: os.Getenv("OPENAI_API_KEY"),
+    RateLimit: gaugo.RateLimitConfig{
+        RequestsPerMinute: 60,
+    },
+})
+```
+
+Rate limiting is proactive — requests are held before they are sent. This prevents `429` errors that would otherwise corrupt metric scores. Use it alongside `WithParallelism` when running large suites against providers with strict per-minute quotas.
+
 ## Anthropic large-suite tuning
 
 For large RAG suites that use Anthropic as the judge, start conservative. A case
@@ -190,6 +218,7 @@ Bundled provider configs share these fields:
 ```go
 HTTPClient      *http.Client
 Retry           gaugo.RetryConfig
+RateLimit       gaugo.RateLimitConfig
 MaxResponseBody int64
 ```
 
@@ -237,6 +266,7 @@ If both are set, `EndpointURL` wins.
 
 - Set `WithCaseTimeout` before running LLM-backed metrics in CI.
 - Tune `WithParallelism` against provider rate limits, not CPU alone.
+- Use `RateLimitConfig.RequestsPerMinute` when `WithParallelism` alone is not enough to stay under provider quotas.
 - Keep `MaxResponseBody` small unless you intentionally need large provider responses.
 - Use strict URL defaults for hosted providers.
 - Use `AllowUnsafeURL` only for trusted test/proxy infrastructure.

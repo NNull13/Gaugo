@@ -36,6 +36,7 @@ judge, err := anthropic.New(anthropic.Config{
     MaxTokens:       1024,
     HTTPClient:      &http.Client{Timeout: 30 * time.Second},
     Retry:           gaugo.DefaultRetryConfig(),
+    RateLimit:       gaugo.RateLimitConfig{},
     MaxResponseBody: 1 << 20,
 })
 if err != nil {
@@ -100,6 +101,22 @@ if err != nil {
 ```
 
 Retries apply to transient `429`/`5xx` responses and transient transport failures. `Retry-After` is honored when returned by the provider.
+
+## Rate limiting example
+
+Anthropic enforces per-minute request limits. Use `RateLimit` when running large suites in parallel to avoid metric scores being lost to `429` errors.
+
+```go
+judge, err := anthropic.New(anthropic.Config{
+    APIKey: os.Getenv("ANTHROPIC_API_KEY"),
+    RateLimit: gaugo.RateLimitConfig{
+        RequestsPerMinute: 50,
+    },
+})
+if err != nil {
+    return err
+}
+```
 
 ## Common errors
 

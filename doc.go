@@ -55,6 +55,7 @@
 // # Provider judges
 //
 // Metrics that require LLM evaluation use a [Judge] interface. Built-in adapters
-// are provided for OpenAI, Anthropic, Gemini, xAI, and local models (Ollama).
+// are provided for OpenAI, Anthropic, Gemini, xAI, NVIDIA NIM, and custom
+// endpoints (Ollama, LM Studio, and other OpenAI/Anthropic-compatible servers).
 // See the provider sub-packages for configuration details.
 package gaugo

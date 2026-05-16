@@ -69,3 +69,17 @@ type JudgeResponse struct {
 	RequestID string
 	Latency   time.Duration
 }
+
+// FuncJudge is a Judge backed by a plain function. Use it to implement a
+// custom LLM judge without defining a named type:
+//
+//	gaugo.WithJudge(gaugo.FuncJudge(func(ctx context.Context, req gaugo.JudgeRequest) (gaugo.JudgeResponse, error) {
+//	    // call your own LLM with req.Instructions and req.Schema
+//	    return gaugo.JudgeResponse{RawJSON: myJSON}, nil
+//	}))
+type FuncJudge func(ctx context.Context, req JudgeRequest) (JudgeResponse, error)
+
+// EvaluateJSON implements [Judge].
+func (f FuncJudge) EvaluateJSON(ctx context.Context, req JudgeRequest) (JudgeResponse, error) {
+	return f(ctx, req)
+}

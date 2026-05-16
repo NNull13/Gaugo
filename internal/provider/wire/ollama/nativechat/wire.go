@@ -42,9 +42,9 @@ const wireName = "ollama"
 func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.EvalResult, error) {
 	model := strings.TrimSpace(cfg.Model)
 	if model == "" {
-		model = provider.LocalDefaultModel
+		model = provider.CustomDefaultModel
 	}
-	endpoint := wire.EndpointURL(cfg.EndpointURL, cfg.BaseURL, provider.LocalBaseURL, provider.OllamaNativeChatPath)
+	endpoint := wire.EndpointURL(cfg.EndpointURL, cfg.BaseURL, provider.CustomBaseURL, provider.OllamaNativeChatPath)
 
 	schema, err := wire.DecodeSchema(req.Schema)
 	if err != nil {
@@ -65,7 +65,7 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		},
 	})
 	if err != nil {
-		return wire.EvalResult{}, wire.MarshalRequestErrorForWire(provider.Local, wireName, err)
+		return wire.EvalResult{}, wire.MarshalRequestErrorForWire(provider.Custom, wireName, err)
 	}
 
 	headers := map[string]string{
@@ -81,10 +81,10 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 		MaxBodyBytes: cfg.MaxResponseBody,
 	})
 	if err != nil {
-		return wire.EvalResult{}, wire.JudgeRequestErrorForWire(provider.Local, wireName, err)
+		return wire.EvalResult{}, wire.JudgeRequestErrorForWire(provider.Custom, wireName, err)
 	}
 	if resp.StatusCode >= http.StatusBadRequest {
-		return wire.EvalResult{}, wire.StatusErrorForWire(provider.Local, wireName, resp)
+		return wire.EvalResult{}, wire.StatusErrorForWire(provider.Custom, wireName, resp)
 	}
 
 	var parsed struct {
@@ -96,16 +96,16 @@ func EvaluateJSON(ctx context.Context, cfg Config, req wire.EvalRequest) (wire.E
 	err = json.Unmarshal(resp.Body, &parsed)
 	requestID := wire.RequestID(resp.Header)
 	if err != nil {
-		return wire.EvalResult{}, wire.DecodeResponseWrapErrorForWire(provider.Local, wireName, err, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseWrapErrorForWire(provider.Custom, wireName, err, requestID)
 	}
 
 	content := wire.StripCodeFence(parsed.Message.Content)
 	if strings.TrimSpace(content) == "" {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, provider.Local, wireName, wire.ErrEmptyMessageContent, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, provider.Custom, wireName, wire.ErrEmptyMessageContent, requestID)
 	}
 	rawJSON := []byte(strings.TrimSpace(content))
 	if !json.Valid(rawJSON) {
-		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, provider.Local, wireName, wire.ErrInvalidJSONPayload, requestID)
+		return wire.EvalResult{}, wire.DecodeResponseErrorForWire(wire.ErrorKindProviderResponse, provider.Custom, wireName, wire.ErrInvalidJSONPayload, requestID)
 	}
 
 	outModel := strings.TrimSpace(parsed.Model)

@@ -188,6 +188,34 @@ judge, err := openai.New(openai.Config{
 
 `Retry-After` is honored when providers send it, capped by `MaxDelay`.
 
+## Rate limiting
+
+Retry handles `429` reactively — after the provider rejects a request. When running large suites in parallel, many requests can hit the provider simultaneously and all fail before any retry helps.
+
+Use `RateLimitConfig` to throttle requests proactively. The limiter holds requests before they are sent, keeping outgoing traffic within the provider's quota.
+
+```go
+judge, err := openai.New(openai.Config{
+    APIKey: os.Getenv("OPENAI_API_KEY"),
+    RateLimit: gaugo.RateLimitConfig{
+        RequestsPerMinute: 60,
+    },
+})
+```
+
+The limiter is shared across all goroutines using the same judge, so `RequestsPerMinute` is enforced per judge instance (per API key). It works alongside `WithParallelism`: parallelism controls how many cases run concurrently; rate limiting controls how fast judge requests leave the process.
+
+`Burst` defaults to `1`. Increase it to allow an initial burst before the steady rate takes effect.
+
+```go
+RateLimit: gaugo.RateLimitConfig{
+    RequestsPerMinute: 60,
+    Burst:             10, // first 10 requests fire immediately, then throttle
+},
+```
+
+If `ctx` is canceled while waiting for a token (e.g. a `WithCaseTimeout` fires), `Wait` returns `ctx.Err()` and the metric records the cancellation.
+
 ## Response body limits
 
 Bundled providers cap response bodies. Use `MaxResponseBody` to adjust the limit.
